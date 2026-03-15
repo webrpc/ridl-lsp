@@ -1,12 +1,17 @@
 package documents
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/webrpc/webrpc/schema/ridl"
+)
 
 type Document struct {
 	URI     string
 	Path    string
 	Content string
 	Version int32
+	Result  *ridl.ParseResult
 }
 
 type Store struct {
@@ -50,6 +55,17 @@ func (s *Store) All() []*Document {
 	for _, doc := range s.docs {
 		out = append(out, doc)
 	}
-
 	return out
+}
+
+func (s *Store) FindByPath(path string) (*Document, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, doc := range s.docs {
+		if doc.Path == path {
+			return doc, true
+		}
+	}
+	return nil, false
 }

@@ -5,10 +5,11 @@ import (
 	"log"
 	"os"
 
-	"github.com/webrpc/ridl-lsp/internal/lsp"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.uber.org/zap"
+
+	"github.com/webrpc/ridl-lsp/internal/lsp"
 )
 
 func main() {
@@ -21,7 +22,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("create logger: %v", err)
 	}
-	defer logger.Sync()
+	defer logger.Sync() //nolint:errcheck // best-effort flush on shutdown
 
 	server := lsp.NewServer()
 	_, conn, client := protocol.NewServer(ctx, server, stream, logger)

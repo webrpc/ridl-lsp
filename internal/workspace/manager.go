@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+
+	"go.lsp.dev/protocol"
 )
 
 type Manager struct {
@@ -42,4 +44,24 @@ func URIToPath(uri string) string {
 	}
 
 	return filepath.FromSlash(path)
+}
+
+func PathToURI(p string) protocol.DocumentURI {
+	if p == "" {
+		return ""
+	}
+
+	if absPath, err := filepath.Abs(p); err == nil {
+		p = absPath
+	}
+
+	slashPath := filepath.ToSlash(p)
+	if !strings.HasPrefix(slashPath, "/") {
+		slashPath = "/" + slashPath
+	}
+
+	return protocol.DocumentURI((&url.URL{
+		Scheme: "file",
+		Path:   slashPath,
+	}).String())
 }

@@ -1,12 +1,79 @@
 package ridl
 
-// Parser is the seam between generic LSP plumbing and RIDL-specific analysis.
-// This lets us swap in the existing webrpc RIDL parser without coupling the
-// transport layer to its concrete types too early.
-type Parser interface {
-	Parse(path string, content string) (*Result, error)
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/webrpc/webrpc/schema/ridl"
+)
+
+// ParseResult wraps the upstream ridl.ParseResult for use across the LSP.
+type ParseResult = ridl.ParseResult
+
+// Parser wraps the upstream RIDL parser, providing an overlay-aware filesystem
+// so that unsaved editor buffers are visible during parsing.
+type Parser struct{}
+
+func NewParser() *Parser {
+	return &Parser{}
 }
 
-type Result struct {
-	Diagnostics int
+// Parse parses the RIDL file at path using workspace as the fs root.
+// overlays maps relative paths to in-memory content (open editor buffers).
+func (p *Parser) Parse(workspace, path string, overlays map[string]string) (*ParseResult, error) {
+	fsys, root, relPath, err := parserFS(workspace, path, overlays)
+	if err != nil {
+		return nil, err
+	}
+
+	parser := ridl.NewParser(fsys, root, relPath)
+	return parser.ParseForLSP()
+}
+
+func parserFS(workspace, path string, overlays map[string]string) (fs.FS, string, string, error) {
+	if workspace != "" {
+		if relPath, ok := fsRelativePath(workspace, path); ok {
+			return newOverlayFS(os.DirFS(workspace), overlays), workspace, relPath, nil
+		}
+	}
+
+	root := filesystemRoot(path)
+	if relPath, ok := fsRelativePath(root, path); ok {
+		return newOverlayFS(os.DirFS(root), overlays), root, relPath, nil
+	}
+
+	docDir := filepath.Dir(path)
+	docBase := filepath.Base(path)
+	return newOverlayFS(os.DirFS(docDir), overlays), docDir, docBase, nil
+}
+
+func fsRelativePath(root, path string) (string, bool) {
+	relPath, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", false
+	}
+
+	relPath = filepath.Clean(relPath)
+	if relPath == "." {
+		return "", false
+	}
+
+	relPath = filepath.ToSlash(relPath)
+	if relPath == "." || strings.HasPrefix(relPath, "../") || relPath == ".." {
+		return "", false
+	}
+	if !fs.ValidPath(relPath) {
+		return "", false
+	}
+	return relPath, true
+}
+
+func filesystemRoot(path string) string {
+	cleanPath := filepath.Clean(path)
+	if volume := filepath.VolumeName(cleanPath); volume != "" {
+		return volume + string(filepath.Separator)
+	}
+	return string(filepath.Separator)
 }

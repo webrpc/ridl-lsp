@@ -1,0 +1,56 @@
+version: "2"
+run:
+  concurrency: 8
+output:
+  sort-order:
+    - linter
+    - file
+    - severity
+linters:
+  default: none
+  enable: # https://golangci-lint.run/docs/linters
+    - govet
+    - errcheck # Detects unhandled errors.
+    - errorlint # Finds code that can cause problems with the error wrapping scheme introduced in Go 1.13.
+    - staticcheck # Enables SA checks: https://staticcheck.dev/docs/checks
+    - unused # Checks for unused constants, variables, functions and types.
+    - errname # Enforces that sentinel errors are prefixed with the Err and error types are suffixed with the Error.
+    - fatcontext # Detects nested contexts in loops and function literals.
+    - usestdlibvars # Detects the possibility to use variables/constants from the Go standard library.
+  settings:
+    errorlint:
+      errorf: true
+      errorf-multi: true
+      asserts: true
+      comparison: true
+    usestdlibvars:
+      http-status-code: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - vendor
+      - bin
+formatters:
+  enable:
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/webrpc/ridl-lsp)
+      custom-order: true
+      no-lex-order: false
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+      - bin
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
