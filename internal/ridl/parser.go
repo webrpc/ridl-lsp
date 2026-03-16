@@ -173,16 +173,32 @@ func (p *Parser) parse(workspace, path string, overlays map[string]string, visit
 
 	rootNode := astParser.root
 	result.Root = &rootNode
+	imported := len(visited) > 0
 	result.Schema = p.buildPartialSchema(workspace, path, result.Root, overlays, visited)
 
 	schemaDoc, err := upridl.NewParser(fsys, root, relPath).Parse()
 	if err != nil {
+		if isVersionOptionalSchemaError(err, imported) {
+			return result, nil
+		}
 		result.Errors = []error{err}
 		return result, nil
 	}
 
 	result.Schema = schemaDoc
 	return result, nil
+}
+
+func isVersionOptionalSchemaError(err error, imported bool) bool {
+	if err == nil {
+		return false
+	}
+
+	if !strings.Contains(err.Error(), "schema error: version is required when services are defined") {
+		return false
+	}
+
+	return imported || strings.Contains(err.Error(), "stack trace:")
 }
 
 func (p *Parser) buildPartialSchema(workspace, path string, root *RootNode, overlays map[string]string, visited map[string]struct{}) *schema.WebRPCSchema {
