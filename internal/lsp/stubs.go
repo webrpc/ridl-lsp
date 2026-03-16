@@ -2,8 +2,11 @@ package lsp
 
 import (
 	"context"
+	"path/filepath"
 
 	"go.lsp.dev/protocol"
+
+	"github.com/webrpc/ridl-lsp/internal/workspace"
 )
 
 func (s *Server) WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) error {
@@ -47,6 +50,24 @@ func (s *Server) DidChangeConfiguration(ctx context.Context, params *protocol.Di
 }
 
 func (s *Server) DidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) error {
+	if params == nil {
+		return nil
+	}
+
+	for _, change := range params.Changes {
+		if change == nil {
+			continue
+		}
+
+		path := workspace.URIToPath(string(change.URI))
+		if filepath.Ext(path) != ".ridl" {
+			continue
+		}
+
+		s.refreshOpenDocuments(ctx)
+		break
+	}
+
 	return nil
 }
 

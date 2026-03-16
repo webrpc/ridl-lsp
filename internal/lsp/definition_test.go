@@ -157,6 +157,75 @@ struct User
 	assertSingleDefinition(t, locations, typesURI, positionAt(t, typesContent, "User"))
 }
 
+func TestDefinitionResolvesNestedImportedType(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	mainContent := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - ../shared/types.ridl
+
+service TestService
+  - GetUser() => (user: User)
+`
+	mainDir := filepath.Join(dir, "api")
+	if err := os.MkdirAll(mainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(mainDir, "main.ridl")
+	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	typesDir := filepath.Join(dir, "shared")
+	if err := os.MkdirAll(typesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	typesPath := filepath.Join(typesDir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainURI := fileURI(mainPath)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(mainURI),
+			Text:    mainContent,
+			Version: 1,
+		},
+	})
+
+	typesURI := fileURI(typesPath)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(typesURI),
+			Text:    typesContent,
+			Version: 1,
+		},
+	})
+
+	locations, err := srv.Definition(ctx, &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(mainURI)},
+			Position:     positionAtOccurrence(t, mainContent, "User", 1),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertSingleDefinition(t, locations, typesURI, positionAt(t, typesContent, "User"))
+}
+
 func TestDefinitionResolvesCompositeTypeReference(t *testing.T) {
 	srv, _, dir := setupServer(t)
 	ctx := context.Background()

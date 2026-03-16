@@ -2,11 +2,11 @@ package lsp
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 
 	"go.lsp.dev/protocol"
 
+	"github.com/webrpc/ridl-lsp/internal/workspace"
 	ridl "github.com/webrpc/webrpc/schema/ridl"
 )
 
@@ -99,7 +99,7 @@ func (s *Server) resolveImportedDefinition(path string, root *ridl.RootNode, nam
 			continue
 		}
 
-		importPath := filepath.Clean(filepath.Join(filepath.Dir(path), importNode.Path().String()))
+		importPath := workspace.ResolveImportPath(path, importNode.Path().String())
 		if _, seen := visited[importPath]; seen {
 			continue
 		}

@@ -440,3 +440,153 @@ struct User
 		t.Errorf("expected 0 diagnostics after opening imported file, got %d: %v", len(diags), diags)
 	}
 }
+
+func TestImportedFileCloseRefreshesDiagnostics(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	mainContent := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+
+service TestService
+  - GetUser(id: uint64) => (user: User)
+`
+	mainPath := filepath.Join(dir, "main-close-import.ridl")
+	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainURI := fileURI(mainPath)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(mainURI),
+			Text:    mainContent,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(mainURI)
+	if len(diags) == 0 {
+		t.Fatal("expected diagnostics when imported file is missing")
+	}
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	typesURI := fileURI(typesPath)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(typesURI),
+			Text:    typesContent,
+			Version: 1,
+		},
+	})
+
+	diags = client.getDiagnostics(mainURI)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics after opening imported file, got %d: %v", len(diags), diags)
+	}
+
+	_ = srv.DidClose(ctx, &protocol.DidCloseTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(typesURI)},
+	})
+
+	diags = client.getDiagnostics(mainURI)
+	if len(diags) == 0 {
+		t.Fatal("expected diagnostics after closing overlay-only imported file")
+	}
+}
+
+func TestWatchedImportedFileChangesRefreshDiagnostics(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	mainContent := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - shared/types.ridl
+
+service TestService
+  - GetUser(id: uint64) => (user: User)
+`
+	mainPath := filepath.Join(dir, "watched-main.ridl")
+	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sharedDir := filepath.Join(dir, "shared")
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	typesPath := filepath.Join(sharedDir, "types.ridl")
+
+	mainURI := fileURI(mainPath)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(mainURI),
+			Text:    mainContent,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(mainURI)
+	if len(diags) == 0 {
+		t.Fatal("expected diagnostics when watched imported file is missing")
+	}
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := srv.DidChangeWatchedFiles(ctx, &protocol.DidChangeWatchedFilesParams{
+		Changes: []*protocol.FileEvent{
+			{
+				URI:  protocol.DocumentURI(fileURI(typesPath)),
+				Type: protocol.FileChangeTypeCreated,
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	diags = client.getDiagnostics(mainURI)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics after watched imported file creation, got %d: %v", len(diags), diags)
+	}
+
+	if err := os.Remove(typesPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := srv.DidChangeWatchedFiles(ctx, &protocol.DidChangeWatchedFilesParams{
+		Changes: []*protocol.FileEvent{
+			{
+				URI:  protocol.DocumentURI(fileURI(typesPath)),
+				Type: protocol.FileChangeTypeDeleted,
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	diags = client.getDiagnostics(mainURI)
+	if len(diags) == 0 {
+		t.Fatal("expected diagnostics after watched imported file deletion")
+	}
+}
