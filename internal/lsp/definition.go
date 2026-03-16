@@ -16,12 +16,12 @@ func (s *Server) Definition(ctx context.Context, params *protocol.DefinitionPara
 		return nil, nil
 	}
 
-	result := s.parsePathForNavigation(doc.Path)
-	if result == nil || result.Root == nil {
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, s.parsePathForNavigation(doc.Path))
+	if !semanticDoc.valid() {
 		return nil, nil
 	}
 
-	match := s.definitionAtPath(doc.Content, doc.Path, result, params.Position)
+	match := semanticDoc.definitionAt(params.Position, s.resolveTypeDefinition, s.resolveErrorDefinition)
 	if match == nil {
 		return nil, nil
 	}
@@ -37,83 +37,8 @@ type definitionMatch struct {
 func (m *definitionMatch) location() protocol.Location {
 	return protocol.Location{
 		URI:   PathToURI(m.path),
-		Range: tokenRange(m.token),
+		Range: fallbackTokenRange(m.token),
 	}
-}
-
-func (s *Server) definitionAtPath(content, path string, result *ridl.ParseResult, pos protocol.Position) *definitionMatch {
-	root := result.Root
-	if root == nil {
-		return nil
-	}
-
-	for _, enumNode := range root.Enums() {
-		if tokenContainsPosition(content, enumNode.Name(), pos) {
-			return definitionForToken(path, enumNode.Name())
-		}
-		if tokenContainsPosition(content, enumNode.TypeName(), pos) {
-			return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(content, enumNode.TypeName(), pos))
-		}
-		for _, value := range enumNode.Values() {
-			if tokenContainsPosition(content, value.Left(), pos) {
-				return definitionForToken(path, value.Left())
-			}
-		}
-	}
-
-	for _, structNode := range root.Structs() {
-		if tokenContainsPosition(content, structNode.Name(), pos) {
-			return definitionForToken(path, structNode.Name())
-		}
-		for _, field := range structNode.Fields() {
-			if tokenContainsPosition(content, field.Left(), pos) {
-				return definitionForToken(path, field.Left())
-			}
-			if tokenContainsPosition(content, field.Right(), pos) {
-				return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(content, field.Right(), pos))
-			}
-		}
-	}
-
-	for _, errorNode := range root.Errors() {
-		if tokenContainsPosition(content, errorNode.Name(), pos) {
-			return definitionForToken(path, errorNode.Name())
-		}
-	}
-
-	for _, serviceNode := range root.Services() {
-		if tokenContainsPosition(content, serviceNode.Name(), pos) {
-			return definitionForToken(path, serviceNode.Name())
-		}
-		for _, methodNode := range serviceNode.Methods() {
-			if tokenContainsPosition(content, methodNode.Name(), pos) {
-				return definitionForToken(path, methodNode.Name())
-			}
-			for _, input := range methodNode.Inputs() {
-				if tokenContainsPosition(content, input.Name(), pos) {
-					return definitionForToken(path, input.Name())
-				}
-				if tokenContainsPosition(content, input.TypeName(), pos) {
-					return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(content, input.TypeName(), pos))
-				}
-			}
-			for _, output := range methodNode.Outputs() {
-				if tokenContainsPosition(content, output.Name(), pos) {
-					return definitionForToken(path, output.Name())
-				}
-				if tokenContainsPosition(content, output.TypeName(), pos) {
-					return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(content, output.TypeName(), pos))
-				}
-			}
-			for _, errorToken := range methodNode.Errors() {
-				if tokenContainsPosition(content, errorToken, pos) {
-					return s.resolveErrorDefinition(path, result, errorToken.String())
-				}
-			}
-		}
-	}
-
-	return nil
 }
 
 func definitionForToken(path string, token *ridl.TokenNode) *definitionMatch {
@@ -240,39 +165,6 @@ func importAllowsName(importNode *ridl.ImportNode, name string) bool {
 		}
 	}
 	return false
-}
-
-func identifierAtTokenPosition(content string, token *ridl.TokenNode, pos protocol.Position) string {
-	rng, ok := tokenRangeInContent(content, token, &pos)
-	if token == nil || !ok || pos.Line != rng.Start.Line || pos.Character < rng.Start.Character || pos.Character >= rng.End.Character {
-		return ""
-	}
-
-	value := []rune(token.String())
-	if len(value) == 0 {
-		return ""
-	}
-
-	offset := int(pos.Character - rng.Start.Character)
-	if offset < 0 || offset >= len(value) || !isIdentifierRune(value[offset]) {
-		return ""
-	}
-
-	start := offset
-	for start > 0 && isIdentifierRune(value[start-1]) {
-		start--
-	}
-
-	end := offset
-	for end+1 < len(value) && isIdentifierRune(value[end+1]) {
-		end++
-	}
-
-	return string(value[start : end+1])
-}
-
-func isIdentifierRune(r rune) bool {
-	return r == '_' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
 }
 
 func isBuiltInRIDLType(name string) bool {
