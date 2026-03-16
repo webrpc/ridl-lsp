@@ -180,6 +180,50 @@ service TestService
 	assertNoSemanticToken(t, decoded, "User", protocol.SemanticTokenStruct)
 }
 
+func TestSemanticTokensFullDeltaFallsBackToFullTokens(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct User
+  - id: uint64
+`
+	path := filepath.Join(dir, "semantic-tokens-delta.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	result, err := srv.SemanticTokensFullDelta(ctx, &protocol.SemanticTokensDeltaParams{
+		TextDocument:     protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		PreviousResultID: "previous",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tokens, ok := result.(*protocol.SemanticTokens)
+	if !ok {
+		t.Fatalf("expected full semantic tokens fallback, got %#v", result)
+	}
+
+	decoded := decodeSemanticTokens(t, content, tokens)
+	assertSemanticToken(t, decoded, "struct", protocol.SemanticTokenKeyword, nil)
+	assertSemanticToken(t, decoded, "User", protocol.SemanticTokenStruct, []protocol.SemanticTokenModifiers{protocol.SemanticTokenModifierDeclaration})
+}
+
 type decodedSemanticToken struct {
 	text      string
 	rng       protocol.Range

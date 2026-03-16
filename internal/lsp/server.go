@@ -76,7 +76,9 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 					TokenTypes:     semanticTokenLegendTypes,
 					TokenModifiers: semanticTokenLegendModifiers,
 				},
-				"full":  true,
+				"full": map[string]any{
+					"delta": true,
+				},
 				"range": true,
 			},
 		},

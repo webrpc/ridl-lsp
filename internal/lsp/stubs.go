@@ -131,10 +131,6 @@ func (s *Server) OutgoingCalls(ctx context.Context, params *protocol.CallHierarc
 	return nil, nil
 }
 
-func (s *Server) SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (any, error) {
-	return nil, nil
-}
-
 func (s *Server) Moniker(ctx context.Context, params *protocol.MonikerParams) ([]protocol.Moniker, error) {
 	return nil, nil
 }
