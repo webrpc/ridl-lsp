@@ -116,10 +116,6 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 	return &protocol.CompletionList{}, nil
 }
 
-func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
-	return nil, nil
-}
-
 func (s *Server) Definition(ctx context.Context, params *protocol.DefinitionParams) ([]protocol.Location, error) {
 	return nil, nil
 }

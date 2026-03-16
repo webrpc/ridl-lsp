@@ -20,8 +20,8 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-// Parse parses the RIDL file at path using workspace as the fs root.
-// overlays maps relative paths to in-memory content (open editor buffers).
+// Parse parses the RIDL file at path using workspace as the preferred fs root.
+// overlays maps document paths to in-memory content (open editor buffers).
 func (p *Parser) Parse(workspace, path string, overlays map[string]string) (*ParseResult, error) {
 	fsys, root, relPath, err := parserFS(workspace, path, overlays)
 	if err != nil {
@@ -35,18 +35,30 @@ func (p *Parser) Parse(workspace, path string, overlays map[string]string) (*Par
 func parserFS(workspace, path string, overlays map[string]string) (fs.FS, string, string, error) {
 	if workspace != "" {
 		if relPath, ok := fsRelativePath(workspace, path); ok {
-			return newOverlayFS(os.DirFS(workspace), overlays), workspace, relPath, nil
+			return newOverlayFS(os.DirFS(workspace), overlaysForRoot(workspace, overlays)), workspace, relPath, nil
 		}
 	}
 
 	root := filesystemRoot(path)
 	if relPath, ok := fsRelativePath(root, path); ok {
-		return newOverlayFS(os.DirFS(root), overlays), root, relPath, nil
+		return newOverlayFS(os.DirFS(root), overlaysForRoot(root, overlays)), root, relPath, nil
 	}
 
 	docDir := filepath.Dir(path)
 	docBase := filepath.Base(path)
-	return newOverlayFS(os.DirFS(docDir), overlays), docDir, docBase, nil
+	return newOverlayFS(os.DirFS(docDir), overlaysForRoot(docDir, overlays)), docDir, docBase, nil
+}
+
+func overlaysForRoot(root string, overlays map[string]string) map[string]string {
+	rootOverlays := make(map[string]string, len(overlays))
+	for path, content := range overlays {
+		relPath, ok := fsRelativePath(root, path)
+		if !ok {
+			continue
+		}
+		rootOverlays[relPath] = content
+	}
+	return rootOverlays
 }
 
 func fsRelativePath(root, path string) (string, bool) {

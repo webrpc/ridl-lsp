@@ -68,6 +68,17 @@ func setupServer(t *testing.T) (*Server, *mockClient, string) {
 	return srv, client, dir
 }
 
+func setupServerWithoutRoot(t *testing.T) (*Server, *mockClient) {
+	t.Helper()
+
+	client := newMockClient()
+
+	srv := NewServer()
+	srv.SetClient(client)
+
+	return srv, client
+}
+
 func fileURI(path string) string {
 	return string(workspace.PathToURI(path))
 }
@@ -120,6 +131,64 @@ func TestInvalidDocumentPublishesDiagnostics(t *testing.T) {
 	}
 }
 
+func TestOpenUnsavedDocumentWithoutWorkspaceRootUsesOverlay(t *testing.T) {
+	srv, client := setupServerWithoutRoot(t)
+	ctx := context.Background()
+
+	path := filepath.Join(t.TempDir(), "unsaved.ridl")
+	uri := fileURI(path)
+
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    validRIDL,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics for unsaved document, got %d: %v", len(diags), diags)
+	}
+
+	doc, ok := srv.docs.Get(uri)
+	if !ok {
+		t.Fatal("expected opened document to be tracked")
+	}
+	if doc.Result == nil {
+		t.Fatal("expected parse result for unsaved document")
+	}
+}
+
+func TestDocumentOutsideWorkspaceRootUsesLiveBuffer(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	outsideDir := t.TempDir()
+	path := filepath.Join(outsideDir, "outside.ridl")
+	if err := os.WriteFile(path, []byte(validRIDL), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if filepath.Dir(path) == dir {
+		t.Fatal("expected test document to be outside workspace root")
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    invalidRIDL,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	if len(diags) == 0 {
+		t.Fatal("expected diagnostics from live buffer for document outside workspace root")
+	}
+}
+
 func TestInvalidToValidClearsDiagnostics(t *testing.T) {
 	srv, client, dir := setupServer(t)
 	ctx := context.Background()
@@ -164,6 +233,59 @@ func TestInvalidToValidClearsDiagnostics(t *testing.T) {
 	}
 }
 
+func TestValidToInvalidClearsCachedParseResult(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	path := filepath.Join(dir, "cached-result.ridl")
+	if err := os.WriteFile(path, []byte(validRIDL), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    validRIDL,
+			Version: 1,
+		},
+	})
+
+	doc, ok := srv.docs.Get(uri)
+	if !ok {
+		t.Fatal("expected opened document to be tracked")
+	}
+	if doc.Result == nil {
+		t.Fatal("expected parse result for valid document")
+	}
+
+	_ = srv.DidChange(ctx, &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{
+				URI: protocol.DocumentURI(uri),
+			},
+			Version: 2,
+		},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			{Text: invalidRIDL},
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	if len(diags) == 0 {
+		t.Fatal("expected diagnostics after making document invalid")
+	}
+
+	doc, ok = srv.docs.Get(uri)
+	if !ok {
+		t.Fatal("expected changed document to remain tracked")
+	}
+	if doc.Result != nil {
+		t.Fatal("expected cached parse result to be cleared after parse failure")
+	}
+}
+
 func TestCloseDocumentClearsDiagnostics(t *testing.T) {
 	srv, client, dir := setupServer(t)
 	ctx := context.Background()
@@ -198,6 +320,62 @@ func TestCloseDocumentClearsDiagnostics(t *testing.T) {
 	diags = client.getDiagnostics(uri)
 	if len(diags) != 0 {
 		t.Errorf("expected 0 diagnostics after closing document, got %d", len(diags))
+	}
+}
+
+func TestSaveRefreshesDiagnostics(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	mainContent := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+
+service TestService
+  - GetUser(id: uint64) => (user: User)
+`
+	mainPath := filepath.Join(dir, "main-save.ridl")
+	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainURI := fileURI(mainPath)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(mainURI),
+			Text:    mainContent,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(mainURI)
+	if len(diags) == 0 {
+		t.Fatal("expected diagnostics when imported file is missing")
+	}
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = srv.DidSave(ctx, &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{
+			URI: protocol.DocumentURI(mainURI),
+		},
+	})
+
+	diags = client.getDiagnostics(mainURI)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics after save-triggered refresh, got %d: %v", len(diags), diags)
 	}
 }
 

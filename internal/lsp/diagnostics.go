@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,10 +30,11 @@ func (s *Server) parseAndPublishDiagnostics(ctx context.Context, doc *documents.
 }
 
 func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
-	overlays := s.overlayContents(s.workspace.Root())
+	overlays := s.overlayContents()
 
 	result, err := s.parser.Parse(s.workspace.Root(), doc.Path, overlays)
 	if err != nil {
+		doc.Result = nil
 		return []protocol.Diagnostic{
 			{
 				Range:    lineRange(1),
@@ -45,11 +45,12 @@ func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
 		}
 	}
 
-	doc.Result = result
-
 	if len(result.Errors) == 0 {
+		doc.Result = result
 		return []protocol.Diagnostic{}
 	}
+
+	doc.Result = nil
 
 	diagnostics := make([]protocol.Diagnostic, 0, len(result.Errors))
 	for _, e := range result.Errors {
@@ -60,21 +61,10 @@ func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
 	return diagnostics
 }
 
-func (s *Server) overlayContents(root string) map[string]string {
-	overlays := map[string]string{}
-	if root == "" {
-		return overlays
-	}
+func (s *Server) overlayContents() map[string]string {
+	overlays := make(map[string]string, len(s.docs.All()))
 	for _, doc := range s.docs.All() {
-		relPath, err := filepath.Rel(root, doc.Path)
-		if err != nil {
-			continue
-		}
-		relPath = filepath.ToSlash(filepath.Clean(relPath))
-		if relPath == "." || strings.HasPrefix(relPath, "../") || relPath == ".." {
-			continue
-		}
-		overlays[relPath] = doc.Content
+		overlays[doc.Path] = doc.Content
 	}
 	return overlays
 }
