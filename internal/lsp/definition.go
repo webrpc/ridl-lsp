@@ -21,7 +21,7 @@ func (s *Server) Definition(ctx context.Context, params *protocol.DefinitionPara
 		return nil, nil
 	}
 
-	match := s.definitionAtPath(doc.Path, result, params.Position)
+	match := s.definitionAtPath(doc.Content, doc.Path, result, params.Position)
 	if match == nil {
 		return nil, nil
 	}
@@ -41,72 +41,72 @@ func (m *definitionMatch) location() protocol.Location {
 	}
 }
 
-func (s *Server) definitionAtPath(path string, result *ridl.ParseResult, pos protocol.Position) *definitionMatch {
+func (s *Server) definitionAtPath(content, path string, result *ridl.ParseResult, pos protocol.Position) *definitionMatch {
 	root := result.Root
 	if root == nil {
 		return nil
 	}
 
 	for _, enumNode := range root.Enums() {
-		if tokenContainsPosition(enumNode.Name(), pos) {
+		if tokenContainsPosition(content, enumNode.Name(), pos) {
 			return definitionForToken(path, enumNode.Name())
 		}
-		if tokenContainsPosition(enumNode.TypeName(), pos) {
-			return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(enumNode.TypeName(), pos))
+		if tokenContainsPosition(content, enumNode.TypeName(), pos) {
+			return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(content, enumNode.TypeName(), pos))
 		}
 		for _, value := range enumNode.Values() {
-			if tokenContainsPosition(value.Left(), pos) {
+			if tokenContainsPosition(content, value.Left(), pos) {
 				return definitionForToken(path, value.Left())
 			}
 		}
 	}
 
 	for _, structNode := range root.Structs() {
-		if tokenContainsPosition(structNode.Name(), pos) {
+		if tokenContainsPosition(content, structNode.Name(), pos) {
 			return definitionForToken(path, structNode.Name())
 		}
 		for _, field := range structNode.Fields() {
-			if tokenContainsPosition(field.Left(), pos) {
+			if tokenContainsPosition(content, field.Left(), pos) {
 				return definitionForToken(path, field.Left())
 			}
-			if tokenContainsPosition(field.Right(), pos) {
-				return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(field.Right(), pos))
+			if tokenContainsPosition(content, field.Right(), pos) {
+				return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(content, field.Right(), pos))
 			}
 		}
 	}
 
 	for _, errorNode := range root.Errors() {
-		if tokenContainsPosition(errorNode.Name(), pos) {
+		if tokenContainsPosition(content, errorNode.Name(), pos) {
 			return definitionForToken(path, errorNode.Name())
 		}
 	}
 
 	for _, serviceNode := range root.Services() {
-		if tokenContainsPosition(serviceNode.Name(), pos) {
+		if tokenContainsPosition(content, serviceNode.Name(), pos) {
 			return definitionForToken(path, serviceNode.Name())
 		}
 		for _, methodNode := range serviceNode.Methods() {
-			if tokenContainsPosition(methodNode.Name(), pos) {
+			if tokenContainsPosition(content, methodNode.Name(), pos) {
 				return definitionForToken(path, methodNode.Name())
 			}
 			for _, input := range methodNode.Inputs() {
-				if tokenContainsPosition(input.Name(), pos) {
+				if tokenContainsPosition(content, input.Name(), pos) {
 					return definitionForToken(path, input.Name())
 				}
-				if tokenContainsPosition(input.TypeName(), pos) {
-					return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(input.TypeName(), pos))
+				if tokenContainsPosition(content, input.TypeName(), pos) {
+					return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(content, input.TypeName(), pos))
 				}
 			}
 			for _, output := range methodNode.Outputs() {
-				if tokenContainsPosition(output.Name(), pos) {
+				if tokenContainsPosition(content, output.Name(), pos) {
 					return definitionForToken(path, output.Name())
 				}
-				if tokenContainsPosition(output.TypeName(), pos) {
-					return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(output.TypeName(), pos))
+				if tokenContainsPosition(content, output.TypeName(), pos) {
+					return s.resolveTypeDefinition(path, result, identifierAtTokenPosition(content, output.TypeName(), pos))
 				}
 			}
 			for _, errorToken := range methodNode.Errors() {
-				if tokenContainsPosition(errorToken, pos) {
+				if tokenContainsPosition(content, errorToken, pos) {
 					return s.resolveErrorDefinition(path, result, errorToken.String())
 				}
 			}
@@ -242,19 +242,18 @@ func importAllowsName(importNode *ridl.ImportNode, name string) bool {
 	return false
 }
 
-func identifierAtTokenPosition(token *ridl.TokenNode, pos protocol.Position) string {
-	if token == nil || !tokenContainsPosition(token, pos) {
+func identifierAtTokenPosition(content string, token *ridl.TokenNode, pos protocol.Position) string {
+	rng, ok := tokenRangeInContent(content, token, &pos)
+	if token == nil || !ok || pos.Line != rng.Start.Line || pos.Character < rng.Start.Character || pos.Character >= rng.End.Character {
 		return ""
 	}
 
 	value := []rune(token.String())
-	width := uint32(len(value))
-	if width == 0 {
+	if len(value) == 0 {
 		return ""
 	}
 
-	startChar := uint32(token.Col()) - width
-	offset := int(pos.Character - startChar)
+	offset := int(pos.Character - rng.Start.Character)
 	if offset < 0 || offset >= len(value) || !isIdentifierRune(value[offset]) {
 		return ""
 	}

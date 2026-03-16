@@ -125,6 +125,53 @@ struct User
 	}
 }
 
+func TestHoverResolvesCompositeTypeReference(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct User
+  - id: uint64
+  - name: string
+
+service TestService
+  - ListUsers() => (users: []User)
+`
+	path := filepath.Join(dir, "hover-composite.ridl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	hover, err := srv.Hover(ctx, &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+			Position:     positionAtOccurrence(t, content, "User", 2),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil {
+		t.Fatal("expected hover response for composite type reference")
+	}
+	if !strings.Contains(hover.Contents.Value, "struct User") {
+		t.Fatalf("expected struct hover for composite type, got %q", hover.Contents.Value)
+	}
+}
+
 func positionAt(t *testing.T, content, needle string) protocol.Position {
 	t.Helper()
 	return positionAtOccurrence(t, content, needle, 0)
