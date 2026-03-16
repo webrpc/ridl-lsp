@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -76,15 +77,66 @@ func (s *Server) unresolvedImportCodeActions(doc *documents.Document, diagnostic
 
 	semanticDoc := newSemanticDocument(doc.Path, doc.Content, result)
 	ridlDiagnostics := filterRIDLDiagnostics(diagnostics)
-	actions := make([]protocol.CodeAction, 0, len(result.Root.Imports()))
-	seen := map[string]struct{}{}
+	missingImports := s.missingImports(semanticDoc)
+	if len(missingImports) == 0 {
+		return nil
+	}
 
-	for _, importNode := range result.Root.Imports() {
-		if importNode == nil || importNode.Path() == nil || !s.isMissingImportPath(doc.Path, importNode.Path().String()) {
+	actions := make([]protocol.CodeAction, 0, len(missingImports)+1)
+	for _, missingImport := range missingImports {
+		actions = append(actions, protocol.CodeAction{
+			Title:       `Remove unresolved import "` + missingImport.path + `"`,
+			Kind:        protocol.QuickFix,
+			Diagnostics: ridlDiagnostics,
+			IsPreferred: true,
+			Edit: &protocol.WorkspaceEdit{
+				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+					protocol.DocumentURI(doc.URI): {missingImport.edit},
+				},
+			},
+		})
+	}
+
+	if len(missingImports) > 1 {
+		edits := make([]protocol.TextEdit, 0, len(missingImports))
+		for _, missingImport := range missingImports {
+			edits = append(edits, missingImport.edit)
+		}
+		sortTextEditsDescending(edits)
+
+		actions = append(actions, protocol.CodeAction{
+			Title:       "Remove all unresolved imports",
+			Kind:        protocol.QuickFix,
+			Diagnostics: ridlDiagnostics,
+			Edit: &protocol.WorkspaceEdit{
+				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+					protocol.DocumentURI(doc.URI): edits,
+				},
+			},
+		})
+	}
+
+	return actions
+}
+
+type missingImport struct {
+	path string
+	edit protocol.TextEdit
+}
+
+func (s *Server) missingImports(doc *semanticDocument) []missingImport {
+	if doc == nil || !doc.valid() {
+		return nil
+	}
+
+	missing := make([]missingImport, 0, len(doc.result.Root.Imports()))
+	seen := map[string]struct{}{}
+	for _, importNode := range doc.result.Root.Imports() {
+		if importNode == nil || importNode.Path() == nil || !s.isMissingImportPath(doc.path, importNode.Path().String()) {
 			continue
 		}
 
-		edit, ok := unresolvedImportEdit(semanticDoc, importNode.Path().Line()-1)
+		edit, ok := unresolvedImportEdit(doc, importNode.Path().Line()-1)
 		if !ok {
 			continue
 		}
@@ -95,20 +147,13 @@ func (s *Server) unresolvedImportCodeActions(doc *documents.Document, diagnostic
 		}
 		seen[key] = struct{}{}
 
-		actions = append(actions, protocol.CodeAction{
-			Title:       `Remove unresolved import "` + importNode.Path().String() + `"`,
-			Kind:        protocol.QuickFix,
-			Diagnostics: ridlDiagnostics,
-			IsPreferred: true,
-			Edit: &protocol.WorkspaceEdit{
-				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
-					protocol.DocumentURI(doc.URI): {edit},
-				},
-			},
+		missing = append(missing, missingImport{
+			path: importNode.Path().String(),
+			edit: edit,
 		})
 	}
 
-	return actions
+	return missing
 }
 
 func (s *Server) isMissingImportPath(docPath, importPath string) bool {
@@ -255,6 +300,15 @@ func editKey(edit protocol.TextEdit) string {
 		positionKey(edit.Range.End),
 		edit.NewText,
 	}, ":")
+}
+
+func sortTextEditsDescending(edits []protocol.TextEdit) {
+	sort.SliceStable(edits, func(i, j int) bool {
+		if edits[i].Range.Start.Line != edits[j].Range.Start.Line {
+			return edits[i].Range.Start.Line > edits[j].Range.Start.Line
+		}
+		return edits[i].Range.Start.Character > edits[j].Range.Start.Character
+	})
 }
 
 func positionKey(pos protocol.Position) string {

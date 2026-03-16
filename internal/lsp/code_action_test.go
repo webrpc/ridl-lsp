@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -312,6 +313,105 @@ service TestService
 	}
 }
 
+func TestCodeActionOffersBulkRemoveAllUnresolvedImports(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	sharedDir := filepath.Join(dir, "shared")
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sharedContent := `webrpc = v1
+
+struct Account
+  - id: uint64
+`
+	sharedPath := filepath.Join(sharedDir, "shared.ridl")
+	if err := os.WriteFile(sharedPath, []byte(sharedContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - missing-a.ridl
+  - shared/shared.ridl
+  - missing-b.ridl
+
+service TestService
+  - GetAccount(id: uint64) => (account: Account)
+`
+	want := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - shared/shared.ridl
+
+service TestService
+  - GetAccount(id: uint64) => (account: Account)
+`
+
+	path := filepath.Join(dir, "code-action-remove-all-missing-imports.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	actions, err := srv.CodeAction(ctx, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range:        fullDocumentRange(content),
+		Context: protocol.CodeActionContext{
+			Only:        []protocol.CodeActionKind{protocol.QuickFix},
+			Diagnostics: []protocol.Diagnostic{{Source: "ridl"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(actions) != 3 {
+		t.Fatalf("expected 3 quick fixes, got %d: %#v", len(actions), actions)
+	}
+
+	var bulkAction *protocol.CodeAction
+	for i := range actions {
+		if actions[i].Title == "Remove all unresolved imports" {
+			bulkAction = &actions[i]
+			break
+		}
+	}
+	if bulkAction == nil {
+		t.Fatalf("missing bulk unresolved-import action in %#v", actions)
+	}
+	if bulkAction.Edit == nil {
+		t.Fatal("expected bulk action edit")
+	}
+
+	edits := bulkAction.Edit.Changes[protocol.DocumentURI(uri)]
+	if len(edits) != 2 {
+		t.Fatalf("expected 2 bulk edits, got %#v", edits)
+	}
+
+	got := applyTextEdits(t, content, edits)
+	if got != want {
+		t.Fatalf("unexpected bulk quick fix result:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 func TestCodeActionSkipsMissingImportQuickFixForNonImportDiagnostics(t *testing.T) {
 	srv, client, dir := setupServer(t)
 	ctx := context.Background()
@@ -364,6 +464,24 @@ func applyTextEdit(t *testing.T, content string, edit protocol.TextEdit) string 
 	start := offsetAtPosition(t, content, edit.Range.Start)
 	end := offsetAtPosition(t, content, edit.Range.End)
 	return content[:start] + edit.NewText + content[end:]
+}
+
+func applyTextEdits(t *testing.T, content string, edits []protocol.TextEdit) string {
+	t.Helper()
+
+	sorted := append([]protocol.TextEdit(nil), edits...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Range.Start.Line != sorted[j].Range.Start.Line {
+			return sorted[i].Range.Start.Line > sorted[j].Range.Start.Line
+		}
+		return sorted[i].Range.Start.Character > sorted[j].Range.Start.Character
+	})
+
+	result := content
+	for _, edit := range sorted {
+		result = applyTextEdit(t, result, edit)
+	}
+	return result
 }
 
 func offsetAtPosition(t *testing.T, content string, pos protocol.Position) int {
