@@ -52,7 +52,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			DocumentSymbolProvider:     true,
 			WorkspaceSymbolProvider:    true,
 			CodeActionProvider: &protocol.CodeActionOptions{
-				CodeActionKinds: []protocol.CodeActionKind{protocol.Source},
+				CodeActionKinds: []protocol.CodeActionKind{protocol.QuickFix, protocol.Source},
 			},
 			SemanticTokensProvider: map[string]any{
 				"legend": protocol.SemanticTokensLegend{
