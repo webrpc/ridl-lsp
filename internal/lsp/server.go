@@ -116,10 +116,6 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 	return &protocol.CompletionList{}, nil
 }
 
-func (s *Server) Definition(ctx context.Context, params *protocol.DefinitionParams) ([]protocol.Location, error) {
-	return nil, nil
-}
-
 func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]any, error) {
 	return []any{}, nil
 }
