@@ -135,10 +135,6 @@ func (s *Server) SemanticTokensFullDelta(ctx context.Context, params *protocol.S
 	return nil, nil
 }
 
-func (s *Server) SemanticTokensRefresh(ctx context.Context) error {
-	return nil
-}
-
 func (s *Server) Moniker(ctx context.Context, params *protocol.MonikerParams) ([]protocol.Moniker, error) {
 	return nil, nil
 }

@@ -32,8 +32,9 @@ struct User
 type mockClient struct {
 	protocol.Client
 
-	mu          sync.Mutex
-	diagnostics map[string][]protocol.Diagnostic
+	mu                      sync.Mutex
+	diagnostics             map[string][]protocol.Diagnostic
+	semanticTokensRefreshes int
 }
 
 func newMockClient() *mockClient {
@@ -53,6 +54,19 @@ func (m *mockClient) getDiagnostics(uri string) []protocol.Diagnostic {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.diagnostics[uri]
+}
+
+func (m *mockClient) SemanticTokensRefresh(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.semanticTokensRefreshes++
+	return nil
+}
+
+func (m *mockClient) semanticTokensRefreshCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.semanticTokensRefreshes
 }
 
 func setupServer(t *testing.T) (*Server, *mockClient, string) {
