@@ -75,10 +75,6 @@ func (s *Server) DocumentColor(ctx context.Context, params *protocol.DocumentCol
 	return nil, nil
 }
 
-func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) ([]protocol.DocumentLink, error) {
-	return nil, nil
-}
-
 func (s *Server) DocumentLinkResolve(ctx context.Context, params *protocol.DocumentLink) (*protocol.DocumentLink, error) {
 	return nil, nil
 }
