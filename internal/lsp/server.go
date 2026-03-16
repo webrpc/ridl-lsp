@@ -50,6 +50,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 				RetriggerCharacters: []string{","},
 			},
 			DefinitionProvider:         true,
+			TypeDefinitionProvider:     true,
 			ReferencesProvider:         true,
 			DocumentHighlightProvider:  true,
 			RenameProvider:             true,

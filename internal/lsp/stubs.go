@@ -95,10 +95,6 @@ func (s *Server) RangeFormatting(ctx context.Context, params *protocol.DocumentR
 	return nil, nil
 }
 
-func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) ([]protocol.Location, error) {
-	return nil, nil
-}
-
 func (s *Server) WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) error {
 	return nil
 }
