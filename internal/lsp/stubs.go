@@ -179,10 +179,6 @@ func (s *Server) OutgoingCalls(ctx context.Context, params *protocol.CallHierarc
 	return nil, nil
 }
 
-func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
-	return nil, nil
-}
-
 func (s *Server) SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (any, error) {
 	return nil, nil
 }

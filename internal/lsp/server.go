@@ -47,6 +47,13 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			ReferencesProvider:     true,
 			RenameProvider:         true,
 			DocumentSymbolProvider: true,
+			SemanticTokensProvider: map[string]any{
+				"legend": protocol.SemanticTokensLegend{
+					TokenTypes:     semanticTokenLegendTypes,
+					TokenModifiers: semanticTokenLegendModifiers,
+				},
+				"full": true,
+			},
 		},
 	}, nil
 }
