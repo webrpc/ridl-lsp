@@ -154,6 +154,98 @@ service TestService
 	assertCompletionLabelsDoNotContain(t, list, "string")
 }
 
+func TestCompletionDoesNotTreatLaterArgumentNamesAsTypeContext(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct User
+  - id: uint64
+
+service TestService
+  - GetUser(id: uint64, na)
+`
+	path := filepath.Join(dir, "completion-arg-name.ridl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	list, err := srv.Completion(ctx, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+			Position: func() protocol.Position {
+				pos := positionAt(t, content, "na)")
+				pos.Character += 2
+				return pos
+			}(),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertCompletionLabelsDoNotContain(t, list, "string")
+	assertCompletionLabelsDoNotContain(t, list, "User")
+}
+
+func TestCompletionRestrictsEnumBaseTypes(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct User
+  - id: uint64
+
+enum Kind: 
+`
+	path := filepath.Join(dir, "completion-enum-base.ridl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	list, err := srv.Completion(ctx, &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+			Position:     positionAfter(t, content, "enum Kind: "),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertCompletionLabelsContain(t, list, "uint32")
+	assertCompletionLabelsContain(t, list, "string")
+	assertCompletionLabelsDoNotContain(t, list, "User")
+	assertCompletionLabelsDoNotContain(t, list, "map")
+	assertCompletionLabelsDoNotContain(t, list, "timestamp")
+}
+
 func assertCompletionLabelsContain(t *testing.T, list *protocol.CompletionList, want string) {
 	t.Helper()
 	for _, item := range list.Items {

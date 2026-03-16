@@ -22,6 +22,7 @@ type completionContext int
 const (
 	completionContextNone completionContext = iota
 	completionContextTopLevel
+	completionContextEnumType
 	completionContextType
 )
 
@@ -43,6 +44,8 @@ func (d *semanticDocument) completionItemsAt(pos protocol.Position) []protocol.C
 	switch ctx {
 	case completionContextTopLevel:
 		return keywordCompletionItems(prefix)
+	case completionContextEnumType:
+		return enumTypeCompletionItems(prefix)
 	case completionContextType:
 		return d.typeCompletionItems(prefix)
 	default:
@@ -465,12 +468,16 @@ func (d *semanticDocument) completionContextAt(pos protocol.Position) (completio
 		char = len(lineRunes)
 	}
 
-	before := string(lineRunes[:char])
+	before := completionPrefix(string(lineRunes[:char]))
 	trimmed := strings.TrimSpace(before)
 	indent := leadingIndentWidth(before)
 
 	if indent == 0 && looksLikeTopLevelContext(trimmed) {
 		return completionContextTopLevel, trailingIdentifierFragment(trimmed)
+	}
+
+	if looksLikeEnumTypeContext(trimmed) {
+		return completionContextEnumType, trailingIdentifierFragment(trimmed)
 	}
 
 	if looksLikeTypeContext(before) {
@@ -517,6 +524,10 @@ func keywordCompletionItems(prefix string) []protocol.CompletionItem {
 	return filterCompletionItems(topLevelKeywordCompletions, prefix)
 }
 
+func enumTypeCompletionItems(prefix string) []protocol.CompletionItem {
+	return filterCompletionItems(enumTypeCompletions, prefix)
+}
+
 func leadingIndentWidth(s string) int {
 	width := 0
 	for _, r := range s {
@@ -539,22 +550,37 @@ func looksLikeTopLevelContext(trimmed string) bool {
 	return len(strings.Fields(trimmed)) <= 1
 }
 
+func looksLikeEnumTypeContext(trimmed string) bool {
+	if !strings.HasPrefix(trimmed, "enum ") {
+		return false
+	}
+
+	_, after, ok := strings.Cut(trimmed, ":")
+	if !ok {
+		return false
+	}
+
+	return !hasCompletedTypeExpr(after)
+}
+
 func looksLikeTypeContext(before string) bool {
 	trimmed := strings.TrimSpace(before)
 	if trimmed == "" {
 		return false
 	}
 
-	if idx := strings.LastIndex(before, ":"); idx >= 0 {
-		return true
-	}
-
-	fields := strings.Fields(trimmed)
-	if len(fields) < 2 {
+	segment := activeTypeSegment(before)
+	namePart, typePart, ok := strings.Cut(segment, ":")
+	if !ok {
 		return false
 	}
 
-	return fields[0] == "enum"
+	name := typeTargetName(namePart)
+	if name == "" {
+		return false
+	}
+
+	return !hasCompletedTypeExpr(typePart)
 }
 
 func trailingIdentifierFragment(s string) string {
@@ -619,6 +645,125 @@ func typeCompletionDocumentation(typ *schema.Type) string {
 	return typ.Kind + " " + typ.Name
 }
 
+func completionPrefix(before string) string {
+	if idx := strings.Index(before, "#"); idx >= 0 {
+		return before[:idx]
+	}
+	return before
+}
+
+func activeTypeSegment(before string) string {
+	runes := []rune(before)
+	start := 0
+	angleDepth := 0
+	squareDepth := 0
+	parenDepth := 0
+
+	for i, r := range runes {
+		switch r {
+		case '<':
+			angleDepth++
+		case '>':
+			if angleDepth > 0 {
+				angleDepth--
+			}
+		case '[':
+			squareDepth++
+		case ']':
+			if squareDepth > 0 {
+				squareDepth--
+			}
+		case '(':
+			if angleDepth == 0 && squareDepth == 0 {
+				parenDepth++
+				start = i + 1
+			}
+		case ')':
+			if angleDepth == 0 && squareDepth == 0 && parenDepth > 0 {
+				parenDepth--
+				start = i + 1
+			}
+		case ',':
+			if angleDepth == 0 && squareDepth == 0 {
+				start = i + 1
+			}
+		}
+	}
+
+	return string(runes[start:])
+}
+
+func typeTargetName(beforeColon string) string {
+	trimmed := strings.TrimSpace(beforeColon)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(trimmed, "-") {
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+	}
+
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	name := fields[len(fields)-1]
+	name = strings.TrimSuffix(name, "?")
+	if name == "" {
+		return ""
+	}
+
+	for _, r := range name {
+		if !isIdentifierRune(r) {
+			return ""
+		}
+	}
+
+	return name
+}
+
+func hasCompletedTypeExpr(afterColon string) bool {
+	runes := []rune(afterColon)
+	angleDepth := 0
+	squareDepth := 0
+	parenDepth := 0
+
+	for _, r := range runes {
+		switch r {
+		case '<':
+			angleDepth++
+		case '>':
+			if angleDepth > 0 {
+				angleDepth--
+			}
+		case '[':
+			squareDepth++
+		case ']':
+			if squareDepth > 0 {
+				squareDepth--
+			}
+		case '(':
+			if angleDepth == 0 && squareDepth == 0 {
+				parenDepth++
+			}
+		case ')':
+			if angleDepth == 0 && squareDepth == 0 && parenDepth > 0 {
+				parenDepth--
+			}
+			if angleDepth == 0 && squareDepth == 0 && parenDepth == 0 {
+				return true
+			}
+		case ',':
+			if angleDepth == 0 && squareDepth == 0 && parenDepth == 0 {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 var topLevelKeywordCompletions = []protocol.CompletionItem{
 	keywordCompletionItem("webrpc", "schema version declaration"),
 	keywordCompletionItem("name", "schema name declaration"),
@@ -652,6 +797,20 @@ var coreTypeCompletions = []protocol.CompletionItem{
 	typeCompletionItem("string", "core type"),
 	typeCompletionItem("timestamp", "core type"),
 	typeCompletionItem("map", "map type"),
+}
+
+var enumTypeCompletions = []protocol.CompletionItem{
+	typeCompletionItem("uint", "enum base type"),
+	typeCompletionItem("uint8", "enum base type"),
+	typeCompletionItem("uint16", "enum base type"),
+	typeCompletionItem("uint32", "enum base type"),
+	typeCompletionItem("uint64", "enum base type"),
+	typeCompletionItem("int", "enum base type"),
+	typeCompletionItem("int8", "enum base type"),
+	typeCompletionItem("int16", "enum base type"),
+	typeCompletionItem("int32", "enum base type"),
+	typeCompletionItem("int64", "enum base type"),
+	typeCompletionItem("string", "enum base type"),
 }
 
 func keywordCompletionItem(label, detail string) protocol.CompletionItem {
