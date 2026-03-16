@@ -9,7 +9,7 @@ import (
 	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 )
 
-const showReferencesCommand = "editor.action.showReferences"
+const showReferencesCommand = "ridl.showReferences"
 
 type codeLensData struct {
 	URI       string `json:"uri"`

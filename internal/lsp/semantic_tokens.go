@@ -211,15 +211,11 @@ func (d *semanticDocument) semanticTokenEntries() []semanticTokenEntry {
 		for _, token := range d.typeExprSemanticTokens(enumNode.TypeName()) {
 			entries = append(entries, token)
 		}
-		for _, value := range enumNode.Values() {
-			addToken(d.tokenRange(value.Left(), protocol.Position{}), protocol.SemanticTokenEnumMember, protocol.SemanticTokenModifierDeclaration)
-		}
 	}
 
 	for _, structNode := range d.result.Root.Structs() {
 		addToken(d.tokenRange(structNode.Name(), protocol.Position{}), protocol.SemanticTokenStruct, protocol.SemanticTokenModifierDeclaration)
 		for _, field := range structNode.Fields() {
-			addToken(d.tokenRange(field.Left(), protocol.Position{}), protocol.SemanticTokenProperty, protocol.SemanticTokenModifierDeclaration)
 			for _, token := range d.typeExprSemanticTokens(field.Right()) {
 				entries = append(entries, token)
 			}
