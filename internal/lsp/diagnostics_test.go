@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"go.lsp.dev/protocol"
+	"go.uber.org/zap"
 
 	"github.com/webrpc/ridl-lsp/internal/workspace"
 )
@@ -94,7 +95,7 @@ func setupServer(t *testing.T) (*Server, *mockClient, string) {
 	dir := t.TempDir()
 	client := newMockClient()
 
-	srv := NewServer()
+	srv := NewServer(zap.NewNop())
 	srv.SetClient(client)
 	srv.workspace.SetRoot(dir)
 
@@ -106,7 +107,7 @@ func setupServerWithoutRoot(t *testing.T) (*Server, *mockClient) {
 
 	client := newMockClient()
 
-	srv := NewServer()
+	srv := NewServer(zap.NewNop())
 	srv.SetClient(client)
 
 	return srv, client

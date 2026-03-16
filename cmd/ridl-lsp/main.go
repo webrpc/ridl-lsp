@@ -24,7 +24,7 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck // best-effort flush on shutdown
 
-	server := lsp.NewServer()
+	server := lsp.NewServer(logger)
 	_, conn, client := protocol.NewServer(ctx, server, stream, logger)
 	server.SetClient(client)
 

@@ -3,6 +3,8 @@ package lsp
 import (
 	"context"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestSemanticTokensRefreshRequestsClientRefresh(t *testing.T) {
@@ -19,7 +21,7 @@ func TestSemanticTokensRefreshRequestsClientRefresh(t *testing.T) {
 }
 
 func TestSemanticTokensRefreshSkipsWhenNoClient(t *testing.T) {
-	srv := NewServer()
+	srv := NewServer(zap.NewNop())
 	ctx := context.Background()
 
 	if err := srv.SemanticTokensRefresh(ctx); err != nil {

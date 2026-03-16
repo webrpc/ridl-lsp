@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"go.lsp.dev/protocol"
+	"go.uber.org/zap"
 
 	"github.com/webrpc/ridl-lsp/internal/documents"
 	ridlparser "github.com/webrpc/ridl-lsp/internal/ridl"
@@ -15,13 +16,15 @@ type Server struct {
 	workspace *workspace.Manager
 	parser    *ridlparser.Parser
 	client    protocol.Client
+	logger    *zap.Logger
 }
 
-func NewServer() *Server {
+func NewServer(logger *zap.Logger) *Server {
 	return &Server{
 		docs:      documents.NewStore(),
 		workspace: workspace.NewManager(),
 		parser:    ridlparser.NewParser(),
+		logger:    logger,
 	}
 }
 

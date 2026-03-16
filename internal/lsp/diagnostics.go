@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"go.lsp.dev/protocol"
+	"go.uber.org/zap"
 
 	"github.com/webrpc/ridl-lsp/internal/documents"
 	"github.com/webrpc/ridl-lsp/internal/workspace"
@@ -23,10 +24,12 @@ func (s *Server) parseAndPublishDiagnostics(ctx context.Context, doc *documents.
 		return
 	}
 
-	_ = s.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
+	if err := s.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
 		URI:         protocol.DocumentURI(doc.URI),
 		Diagnostics: diagnostics,
-	})
+	}); err != nil {
+		s.logger.Error("failed to publish diagnostics", zap.String("uri", doc.URI), zap.Error(err))
+	}
 }
 
 func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {

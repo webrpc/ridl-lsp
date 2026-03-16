@@ -100,11 +100,11 @@ func formatMethodArgumentHover(method *schema.Method, name string, input bool) s
 		return ""
 	}
 
-	args := method.Outputs
-	kind := "Output"
-	if input {
-		args = method.Inputs
-		kind = "Input"
+	args := method.Inputs
+	kind := "Input"
+	if !input {
+		args = method.Outputs
+		kind = "Output"
 	}
 
 	for _, arg := range args {
