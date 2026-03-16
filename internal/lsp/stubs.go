@@ -87,10 +87,6 @@ func (s *Server) WillSave(ctx context.Context, params *protocol.WillSaveTextDocu
 	return nil
 }
 
-func (s *Server) WillSaveWaitUntil(ctx context.Context, params *protocol.WillSaveTextDocumentParams) ([]protocol.TextEdit, error) {
-	return nil, nil
-}
-
 func (s *Server) ShowDocument(ctx context.Context, params *protocol.ShowDocumentParams) (*protocol.ShowDocumentResult, error) {
 	return nil, nil
 }

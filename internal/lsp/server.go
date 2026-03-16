@@ -38,7 +38,12 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: protocol.TextDocumentSyncKindFull,
+			TextDocumentSync: &protocol.TextDocumentSyncOptions{
+				OpenClose:         true,
+				Change:            protocol.TextDocumentSyncKindFull,
+				WillSaveWaitUntil: true,
+				Save:              &protocol.SaveOptions{},
+			},
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{":", " ", "-", ".", "(", "<", "+"},
 			},
