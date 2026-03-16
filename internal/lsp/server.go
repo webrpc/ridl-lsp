@@ -42,9 +42,10 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{":", " ", "-", ".", "(", "<", "+"},
 			},
-			DocumentFormattingProvider: true,
-			FoldingRangeProvider:       true,
-			HoverProvider:              true,
+			DocumentFormattingProvider:      true,
+			DocumentRangeFormattingProvider: true,
+			FoldingRangeProvider:            true,
+			HoverProvider:                   true,
 			SignatureHelpProvider: &protocol.SignatureHelpOptions{
 				TriggerCharacters:   []string{"(", ","},
 				RetriggerCharacters: []string{","},

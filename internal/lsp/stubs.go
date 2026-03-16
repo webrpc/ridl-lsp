@@ -83,10 +83,6 @@ func (s *Server) OnTypeFormatting(ctx context.Context, params *protocol.Document
 	return nil, nil
 }
 
-func (s *Server) RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) ([]protocol.TextEdit, error) {
-	return nil, nil
-}
-
 func (s *Server) WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) error {
 	return nil
 }
