@@ -21,14 +21,6 @@ func (s *Server) SetTrace(ctx context.Context, params *protocol.SetTraceParams) 
 	return nil
 }
 
-func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
-	return nil, nil
-}
-
-func (s *Server) CodeLensResolve(ctx context.Context, params *protocol.CodeLens) (*protocol.CodeLens, error) {
-	return nil, nil
-}
-
 func (s *Server) ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) ([]protocol.ColorPresentation, error) {
 	return nil, nil
 }

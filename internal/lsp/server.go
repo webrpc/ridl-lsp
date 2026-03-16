@@ -50,6 +50,9 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			DocumentOnTypeFormattingProvider: &protocol.DocumentOnTypeFormattingOptions{
 				FirstTriggerCharacter: onTypeFormattingTrigger,
 			},
+			CodeLensProvider: &protocol.CodeLensOptions{
+				ResolveProvider: true,
+			},
 			DocumentFormattingProvider:      true,
 			DocumentRangeFormattingProvider: true,
 			FoldingRangeProvider:            true,
