@@ -54,6 +54,14 @@ func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLink
 	return links, nil
 }
 
+func (s *Server) DocumentLinkResolve(ctx context.Context, params *protocol.DocumentLink) (*protocol.DocumentLink, error) {
+	if params == nil {
+		return nil, nil
+	}
+
+	return params, nil
+}
+
 func (s *Server) existingImportPath(docPath, importPath string) (string, bool) {
 	resolvedPath := workspace.ResolveImportPath(docPath, importPath)
 	if _, ok := s.docs.FindByPath(resolvedPath); ok {

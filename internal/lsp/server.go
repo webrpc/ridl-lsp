@@ -59,7 +59,9 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			WorkspaceSymbolProvider:    true,
 			SelectionRangeProvider:     true,
 			LinkedEditingRangeProvider: true,
-			DocumentLinkProvider:       &protocol.DocumentLinkOptions{},
+			DocumentLinkProvider: &protocol.DocumentLinkOptions{
+				ResolveProvider: true,
+			},
 			CodeActionProvider: &protocol.CodeActionOptions{
 				CodeActionKinds: []protocol.CodeActionKind{protocol.QuickFix, protocol.Source},
 			},
