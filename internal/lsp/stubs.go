@@ -119,10 +119,6 @@ func (s *Server) RangeFormatting(ctx context.Context, params *protocol.DocumentR
 	return nil, nil
 }
 
-func (s *Server) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
-	return nil, nil
-}
-
 func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
 	return nil, nil
 }

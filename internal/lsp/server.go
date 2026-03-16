@@ -44,6 +44,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			},
 			HoverProvider:          true,
 			DefinitionProvider:     true,
+			ReferencesProvider:     true,
 			DocumentSymbolProvider: true,
 		},
 	}, nil
