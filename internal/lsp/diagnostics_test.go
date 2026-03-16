@@ -33,6 +33,7 @@ type mockClient struct {
 	protocol.Client
 
 	mu                      sync.Mutex
+	appliedEdit             *protocol.ApplyWorkspaceEditParams
 	diagnostics             map[string][]protocol.Diagnostic
 	semanticTokensRefreshes int
 }
@@ -63,10 +64,28 @@ func (m *mockClient) SemanticTokensRefresh(ctx context.Context) error {
 	return nil
 }
 
+func (m *mockClient) ApplyEdit(ctx context.Context, params *protocol.ApplyWorkspaceEditParams) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if params == nil {
+		m.appliedEdit = nil
+		return false, nil
+	}
+	cloned := *params
+	m.appliedEdit = &cloned
+	return true, nil
+}
+
 func (m *mockClient) semanticTokensRefreshCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.semanticTokensRefreshes
+}
+
+func (m *mockClient) lastAppliedEdit() *protocol.ApplyWorkspaceEditParams {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.appliedEdit
 }
 
 func setupServer(t *testing.T) (*Server, *mockClient, string) {

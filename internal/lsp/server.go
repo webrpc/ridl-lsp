@@ -79,6 +79,9 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			CodeActionProvider: &protocol.CodeActionOptions{
 				CodeActionKinds: []protocol.CodeActionKind{protocol.QuickFix, protocol.Source},
 			},
+			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
+				Commands: []string{executeCommandFormatDocument},
+			},
 			SemanticTokensProvider: map[string]any{
 				"legend": protocol.SemanticTokensLegend{
 					TokenTypes:     semanticTokenLegendTypes,

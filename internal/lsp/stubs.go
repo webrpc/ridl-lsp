@@ -55,10 +55,6 @@ func (s *Server) DidChangeWorkspaceFolders(ctx context.Context, params *protocol
 	return nil
 }
 
-func (s *Server) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (any, error) {
-	return nil, nil
-}
-
 func (s *Server) Implementation(ctx context.Context, params *protocol.ImplementationParams) ([]protocol.Location, error) {
 	return nil, nil
 }
