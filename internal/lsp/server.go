@@ -53,6 +53,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			CodeLensProvider: &protocol.CodeLensOptions{
 				ResolveProvider: true,
 			},
+			ColorProvider:                   true,
 			DocumentFormattingProvider:      true,
 			DocumentRangeFormattingProvider: true,
 			FoldingRangeProvider:            true,

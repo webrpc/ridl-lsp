@@ -21,10 +21,6 @@ func (s *Server) SetTrace(ctx context.Context, params *protocol.SetTraceParams) 
 	return nil
 }
 
-func (s *Server) ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) ([]protocol.ColorPresentation, error) {
-	return nil, nil
-}
-
 func (s *Server) CompletionResolve(ctx context.Context, params *protocol.CompletionItem) (*protocol.CompletionItem, error) {
 	return params, nil
 }
@@ -57,10 +53,6 @@ func (s *Server) DidChangeWatchedFiles(ctx context.Context, params *protocol.Did
 
 func (s *Server) DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
 	return nil
-}
-
-func (s *Server) DocumentColor(ctx context.Context, params *protocol.DocumentColorParams) ([]protocol.ColorInformation, error) {
-	return nil, nil
 }
 
 func (s *Server) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (any, error) {
