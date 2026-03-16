@@ -458,6 +458,275 @@ oops
 	}
 }
 
+func TestCodeActionOffersAddMissingImportQuickFix(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+service TestService
+  - GetUser() => (user: User)
+`
+	want := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+
+service TestService
+  - GetUser() => (user: User)
+`
+
+	path := filepath.Join(dir, "code-action-add-import.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diagnostics := client.getDiagnostics(uri)
+	if len(diagnostics) == 0 {
+		t.Fatal("expected diagnostics for unresolved type")
+	}
+
+	actions, err := srv.CodeAction(ctx, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range:        fullDocumentRange(content),
+		Context: protocol.CodeActionContext{
+			Only:        []protocol.CodeActionKind{protocol.QuickFix},
+			Diagnostics: diagnostics,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	action := findCodeActionByTitle(actions, `Import "types.ridl" for "User"`)
+	if action == nil {
+		t.Fatalf("missing add-import quick fix in %#v", actions)
+	}
+	if action.Edit == nil {
+		t.Fatal("expected add-import edit")
+	}
+
+	edits := action.Edit.Changes[protocol.DocumentURI(uri)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 add-import edit, got %#v", edits)
+	}
+
+	got := applyTextEdit(t, content, edits[0])
+	if got != want {
+		t.Fatalf("unexpected add-import quick fix result:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestCodeActionAppendsMissingImportToExistingBlock(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	sharedDir := filepath.Join(dir, "shared")
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sharedContent := `webrpc = v1
+
+struct Account
+  - id: uint64
+`
+	sharedPath := filepath.Join(sharedDir, "shared.ridl")
+	if err := os.WriteFile(sharedPath, []byte(sharedContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - shared/shared.ridl
+
+service TestService
+  - GetAccount() => (account: Account)
+  - GetUser() => (user: User)
+`
+	want := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - shared/shared.ridl
+  - types.ridl
+
+service TestService
+  - GetAccount() => (account: Account)
+  - GetUser() => (user: User)
+`
+
+	path := filepath.Join(dir, "code-action-append-import.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diagnostics := client.getDiagnostics(uri)
+	if len(diagnostics) == 0 {
+		t.Fatal("expected diagnostics for unresolved type")
+	}
+
+	actions, err := srv.CodeAction(ctx, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range:        fullDocumentRange(content),
+		Context: protocol.CodeActionContext{
+			Only:        []protocol.CodeActionKind{protocol.QuickFix},
+			Diagnostics: diagnostics,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	action := findCodeActionByTitle(actions, `Import "types.ridl" for "User"`)
+	if action == nil {
+		t.Fatalf("missing append-import quick fix in %#v", actions)
+	}
+	if action.Edit == nil {
+		t.Fatal("expected append-import edit")
+	}
+
+	edits := action.Edit.Changes[protocol.DocumentURI(uri)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 append-import edit, got %#v", edits)
+	}
+
+	got := applyTextEdit(t, content, edits[0])
+	if got != want {
+		t.Fatalf("unexpected append-import quick fix result:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestCodeActionSkipsAmbiguousAddMissingImportQuickFix(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	firstContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	firstPath := filepath.Join(dir, "types-a.ridl")
+	if err := os.WriteFile(firstPath, []byte(firstContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	secondContent := `webrpc = v1
+
+struct User
+  - name: string
+`
+	secondPath := filepath.Join(dir, "types-b.ridl")
+	if err := os.WriteFile(secondPath, []byte(secondContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+service TestService
+  - GetUser() => (user: User)
+`
+	path := filepath.Join(dir, "code-action-ambiguous-import.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diagnostics := client.getDiagnostics(uri)
+	if len(diagnostics) == 0 {
+		t.Fatal("expected diagnostics for unresolved type")
+	}
+
+	actions, err := srv.CodeAction(ctx, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range:        fullDocumentRange(content),
+		Context: protocol.CodeActionContext{
+			Only:        []protocol.CodeActionKind{protocol.QuickFix},
+			Diagnostics: diagnostics,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if action := findCodeActionByTitle(actions, `Import "types-a.ridl" for "User"`); action != nil {
+		t.Fatalf("unexpected ambiguous add-import quick fix %#v", action)
+	}
+	if action := findCodeActionByTitle(actions, `Import "types-b.ridl" for "User"`); action != nil {
+		t.Fatalf("unexpected ambiguous add-import quick fix %#v", action)
+	}
+}
+
+func findCodeActionByTitle(actions []protocol.CodeAction, title string) *protocol.CodeAction {
+	for i := range actions {
+		if actions[i].Title == title {
+			return &actions[i]
+		}
+	}
+	return nil
+}
+
 func applyTextEdit(t *testing.T, content string, edit protocol.TextEdit) string {
 	t.Helper()
 

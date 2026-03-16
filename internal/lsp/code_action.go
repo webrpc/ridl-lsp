@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/webrpc/ridl-lsp/internal/documents"
 	"github.com/webrpc/ridl-lsp/internal/workspace"
+	ridl "github.com/webrpc/webrpc/schema/ridl"
 )
 
 func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
@@ -25,6 +27,7 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 	if codeActionKindRequested(params.Context.Only, protocol.QuickFix) {
 		if doc, ok := s.docs.Get(string(params.TextDocument.URI)); ok {
 			actions = append(actions, s.unresolvedImportCodeActions(doc, params.Context.Diagnostics)...)
+			actions = append(actions, s.missingImportCodeActions(doc, params.Context.Diagnostics)...)
 		}
 	}
 
@@ -119,9 +122,55 @@ func (s *Server) unresolvedImportCodeActions(doc *documents.Document, diagnostic
 	return actions
 }
 
+func (s *Server) missingImportCodeActions(doc *documents.Document, diagnostics []protocol.Diagnostic) []protocol.CodeAction {
+	ridlDiagnostics := filterRIDLDiagnostics(diagnostics)
+	if doc == nil || len(ridlDiagnostics) == 0 {
+		return nil
+	}
+
+	result := s.parsePathForNavigation(doc.Path)
+	if result == nil || result.Root == nil {
+		return nil
+	}
+
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, result)
+	candidates := s.missingImportCandidates(semanticDoc, ridlDiagnostics)
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	actions := make([]protocol.CodeAction, 0, len(candidates))
+	for _, candidate := range candidates {
+		actions = append(actions, protocol.CodeAction{
+			Title:       `Import "` + candidate.importPath + `" for "` + candidate.name + `"`,
+			Kind:        protocol.QuickFix,
+			Diagnostics: ridlDiagnostics,
+			Edit: &protocol.WorkspaceEdit{
+				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+					protocol.DocumentURI(doc.URI): {candidate.edit},
+				},
+			},
+		})
+	}
+
+	return actions
+}
+
 type missingImport struct {
 	path string
 	edit protocol.TextEdit
+}
+
+type unresolvedSymbol struct {
+	kind referenceKind
+	name string
+	rng  protocol.Range
+}
+
+type missingImportCandidate struct {
+	name       string
+	importPath string
+	edit       protocol.TextEdit
 }
 
 func (s *Server) missingImports(doc *semanticDocument) []missingImport {
@@ -154,6 +203,357 @@ func (s *Server) missingImports(doc *semanticDocument) []missingImport {
 	}
 
 	return missing
+}
+
+func (s *Server) missingImportCandidates(doc *semanticDocument, diagnostics []protocol.Diagnostic) []missingImportCandidate {
+	if doc == nil || !doc.valid() {
+		return nil
+	}
+
+	candidates := make([]missingImportCandidate, 0, 4)
+	seen := map[string]struct{}{}
+	for _, unresolved := range doc.unresolvedSymbols(s.resolveTypeDefinition, s.resolveErrorDefinition) {
+		if !diagnosticsContainRange(diagnostics, unresolved.rng) {
+			continue
+		}
+
+		targetPath, ok := s.uniqueImportCandidatePath(doc.path, unresolved.kind, unresolved.name)
+		if !ok || docHasImportedPath(doc, targetPath) {
+			continue
+		}
+
+		importPath, ok := relativeImportPath(doc.path, targetPath)
+		if !ok {
+			continue
+		}
+
+		edit, ok := missingImportEdit(doc, importPath)
+		if !ok {
+			continue
+		}
+
+		key := unresolved.name + ":" + importPath + ":" + editKey(edit)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		candidates = append(candidates, missingImportCandidate{
+			name:       unresolved.name,
+			importPath: importPath,
+			edit:       edit,
+		})
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].name != candidates[j].name {
+			return strings.ToLower(candidates[i].name) < strings.ToLower(candidates[j].name)
+		}
+		return strings.ToLower(candidates[i].importPath) < strings.ToLower(candidates[j].importPath)
+	})
+
+	return candidates
+}
+
+func (d *semanticDocument) unresolvedSymbols(
+	resolveType func(path string, result *ridl.ParseResult, name string) *definitionMatch,
+	resolveError func(path string, result *ridl.ParseResult, name string) *definitionMatch,
+) []unresolvedSymbol {
+	if d == nil || !d.valid() {
+		return nil
+	}
+
+	symbols := make([]unresolvedSymbol, 0, 8)
+	seen := map[string]struct{}{}
+
+	appendTypeRefs := func(token *ridl.TokenNode) {
+		for _, name := range unresolvedTypeNames(token.String()) {
+			if isBuiltInRIDLType(name) || resolveType(d.path, d.result, name) != nil {
+				continue
+			}
+			for _, rng := range d.identifierRangesInToken(token, name) {
+				key := name + ":" + positionKey(rng.Start)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				symbols = append(symbols, unresolvedSymbol{
+					kind: referenceKindType,
+					name: name,
+					rng:  rng,
+				})
+			}
+		}
+	}
+
+	appendErrorRef := func(token *ridl.TokenNode) {
+		if token == nil {
+			return
+		}
+		name := token.String()
+		if name == "" || resolveError(d.path, d.result, name) != nil {
+			return
+		}
+
+		rng := d.tokenRange(token, protocol.Position{})
+		key := name + ":" + positionKey(rng.Start)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		symbols = append(symbols, unresolvedSymbol{
+			kind: referenceKindError,
+			name: name,
+			rng:  rng,
+		})
+	}
+
+	for _, enumNode := range d.result.Root.Enums() {
+		appendTypeRefs(enumNode.TypeName())
+		for _, value := range enumNode.Values() {
+			appendTypeRefs(value.Right())
+		}
+	}
+
+	for _, structNode := range d.result.Root.Structs() {
+		for _, field := range structNode.Fields() {
+			appendTypeRefs(field.Right())
+		}
+	}
+
+	for _, serviceNode := range d.result.Root.Services() {
+		for _, methodNode := range serviceNode.Methods() {
+			for _, input := range methodNode.Inputs() {
+				appendTypeRefs(input.TypeName())
+			}
+			for _, output := range methodNode.Outputs() {
+				appendTypeRefs(output.TypeName())
+			}
+			for _, errorToken := range methodNode.Errors() {
+				appendErrorRef(errorToken)
+			}
+		}
+	}
+
+	sort.SliceStable(symbols, func(i, j int) bool {
+		if symbols[i].rng.Start.Line != symbols[j].rng.Start.Line {
+			return symbols[i].rng.Start.Line < symbols[j].rng.Start.Line
+		}
+		if symbols[i].rng.Start.Character != symbols[j].rng.Start.Character {
+			return symbols[i].rng.Start.Character < symbols[j].rng.Start.Character
+		}
+		return strings.ToLower(symbols[i].name) < strings.ToLower(symbols[j].name)
+	})
+
+	return symbols
+}
+
+func unresolvedTypeNames(expr string) []string {
+	if expr == "" {
+		return nil
+	}
+
+	names := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	var current []rune
+
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		name := string(current)
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			names = append(names, name)
+		}
+		current = current[:0]
+	}
+
+	for _, r := range expr {
+		if isIdentifierRune(r) {
+			current = append(current, r)
+			continue
+		}
+		flush()
+	}
+	flush()
+
+	return names
+}
+
+func (s *Server) uniqueImportCandidatePath(docPath string, kind referenceKind, name string) (string, bool) {
+	matches := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+
+	for _, path := range s.referenceCandidatePaths() {
+		if path == "" || path == docPath {
+			continue
+		}
+
+		result := s.parsePathForNavigation(path)
+		if result == nil || result.Root == nil {
+			continue
+		}
+
+		var token *ridl.TokenNode
+		switch kind {
+		case referenceKindType:
+			token = findTypeDefinitionToken(result.Root, name)
+		case referenceKindError:
+			token = findErrorDefinitionToken(result.Root, name)
+		}
+		if token == nil {
+			continue
+		}
+
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		matches = append(matches, path)
+		if len(matches) > 1 {
+			return "", false
+		}
+	}
+
+	if len(matches) != 1 {
+		return "", false
+	}
+	return matches[0], true
+}
+
+func docHasImportedPath(doc *semanticDocument, targetPath string) bool {
+	if doc == nil || !doc.valid() {
+		return false
+	}
+
+	for _, importNode := range doc.result.Root.Imports() {
+		if importNode == nil || importNode.Path() == nil {
+			continue
+		}
+		if workspace.ResolveImportPath(doc.path, importNode.Path().String()) == targetPath {
+			return true
+		}
+	}
+
+	return false
+}
+
+func relativeImportPath(sourcePath, targetPath string) (string, bool) {
+	if sourcePath == "" || targetPath == "" {
+		return "", false
+	}
+
+	relPath, err := filepath.Rel(filepath.Dir(sourcePath), targetPath)
+	if err != nil {
+		return "", false
+	}
+
+	relPath = filepath.ToSlash(filepath.Clean(relPath))
+	if relPath == "." || relPath == "" {
+		return "", false
+	}
+
+	return relPath, true
+}
+
+func diagnosticsContainRange(diagnostics []protocol.Diagnostic, rng protocol.Range) bool {
+	for _, diagnostic := range diagnostics {
+		if rangesOverlap(diagnostic.Range, rng) {
+			return true
+		}
+	}
+	return false
+}
+
+func rangesOverlap(a, b protocol.Range) bool {
+	return positionLess(a.Start, b.End) && positionLess(b.Start, a.End)
+}
+
+func positionLess(a, b protocol.Position) bool {
+	if a.Line != b.Line {
+		return a.Line < b.Line
+	}
+	return a.Character < b.Character
+}
+
+func missingImportEdit(doc *semanticDocument, importPath string) (protocol.TextEdit, bool) {
+	if doc == nil || importPath == "" {
+		return protocol.TextEdit{}, false
+	}
+
+	lines := splitContentLines(doc.content)
+	imports := doc.result.Root.Imports()
+	if len(imports) > 0 {
+		if imports[0] == nil || imports[0].Path() == nil || imports[len(imports)-1] == nil || imports[len(imports)-1].Path() == nil {
+			return protocol.TextEdit{}, false
+		}
+
+		firstLine := imports[0].Path().Line() - 1
+		lastLine := imports[len(imports)-1].Path().Line() - 1
+		if firstLine >= 0 && firstLine < len(lines) && strings.HasPrefix(trimmedLine(lines[firstLine]), "import ") {
+			return protocol.TextEdit{
+				Range: lineDeletionRange(doc, lines, firstLine, firstLine+1),
+				NewText: "import\n" +
+					"  - " + imports[0].Path().String() + "\n" +
+					"  - " + importPath + "\n",
+			}, true
+		}
+
+		insertOffset := lineStartOffset(lines, lastLine+1)
+		insertPos, ok := doc.positionAtOffset(insertOffset)
+		if !ok {
+			return protocol.TextEdit{}, false
+		}
+
+		return protocol.TextEdit{
+			Range:   protocol.Range{Start: insertPos, End: insertPos},
+			NewText: "  - " + importPath + "\n",
+		}, true
+	}
+
+	insertLine := importInsertLine(lines)
+	insertOffset := lineStartOffset(lines, insertLine)
+	insertPos, ok := doc.positionAtOffset(insertOffset)
+	if !ok {
+		return protocol.TextEdit{}, false
+	}
+
+	prefix := ""
+	if insertLine > 0 && trimmedLine(lines[insertLine-1]) != "" {
+		prefix = "\n"
+	}
+
+	suffix := ""
+	if insertLine < len(lines) && trimmedLine(lines[insertLine]) != "" {
+		suffix = "\n"
+	}
+
+	return protocol.TextEdit{
+		Range: protocol.Range{Start: insertPos, End: insertPos},
+		NewText: prefix + "import\n" +
+			"  - " + importPath + "\n" +
+			suffix,
+	}, true
+}
+
+func importInsertLine(lines []string) int {
+	for i, line := range lines {
+		trimmed := trimmedLine(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "service ") ||
+			strings.HasPrefix(trimmed, "struct ") ||
+			strings.HasPrefix(trimmed, "enum ") ||
+			strings.HasPrefix(trimmed, "error ") ||
+			trimmed == "import" ||
+			strings.HasPrefix(trimmed, "import ") {
+			return i
+		}
+	}
+
+	return len(lines)
 }
 
 func (s *Server) isMissingImportPath(docPath, importPath string) bool {
