@@ -47,6 +47,9 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{":", " ", "-", ".", "(", "<", "+"},
 			},
+			DocumentOnTypeFormattingProvider: &protocol.DocumentOnTypeFormattingOptions{
+				FirstTriggerCharacter: onTypeFormattingTrigger,
+			},
 			DocumentFormattingProvider:      true,
 			DocumentRangeFormattingProvider: true,
 			FoldingRangeProvider:            true,

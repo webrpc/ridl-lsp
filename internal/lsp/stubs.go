@@ -79,10 +79,6 @@ func (s *Server) Implementation(ctx context.Context, params *protocol.Implementa
 	return nil, nil
 }
 
-func (s *Server) OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) ([]protocol.TextEdit, error) {
-	return nil, nil
-}
-
 func (s *Server) WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) error {
 	return nil
 }
