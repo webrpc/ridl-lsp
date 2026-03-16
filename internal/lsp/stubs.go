@@ -37,10 +37,6 @@ func (s *Server) CompletionResolve(ctx context.Context, params *protocol.Complet
 	return params, nil
 }
 
-func (s *Server) Declaration(ctx context.Context, params *protocol.DeclarationParams) ([]protocol.Location, error) {
-	return nil, nil
-}
-
 func (s *Server) DidChangeConfiguration(ctx context.Context, params *protocol.DidChangeConfigurationParams) error {
 	return nil
 }

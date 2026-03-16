@@ -49,6 +49,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 				TriggerCharacters:   []string{"(", ","},
 				RetriggerCharacters: []string{","},
 			},
+			DeclarationProvider:        true,
 			DefinitionProvider:         true,
 			TypeDefinitionProvider:     true,
 			ReferencesProvider:         true,
