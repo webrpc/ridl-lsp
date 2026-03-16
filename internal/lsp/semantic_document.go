@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -16,6 +17,14 @@ type semanticDocument struct {
 	result  *ridl.ParseResult
 }
 
+type completionContext int
+
+const (
+	completionContextNone completionContext = iota
+	completionContextTopLevel
+	completionContextType
+)
+
 func newSemanticDocument(path, content string, result *ridl.ParseResult) *semanticDocument {
 	return &semanticDocument{
 		path:    path,
@@ -26,6 +35,19 @@ func newSemanticDocument(path, content string, result *ridl.ParseResult) *semant
 
 func (d *semanticDocument) valid() bool {
 	return d != nil && d.result != nil && d.result.Root != nil && d.result.Schema != nil
+}
+
+func (d *semanticDocument) completionItemsAt(pos protocol.Position) []protocol.CompletionItem {
+	ctx, prefix := d.completionContextAt(pos)
+
+	switch ctx {
+	case completionContextTopLevel:
+		return keywordCompletionItems(prefix)
+	case completionContextType:
+		return d.typeCompletionItems(prefix)
+	default:
+		return []protocol.CompletionItem{}
+	}
 }
 
 func (d *semanticDocument) hoverAt(pos protocol.Position) *hoverMatch {
@@ -426,6 +448,232 @@ func (d *semanticDocument) lineText(targetLine int) (string, bool) {
 		return d.content[start:], true
 	}
 	return "", false
+}
+
+func (d *semanticDocument) completionContextAt(pos protocol.Position) (completionContext, string) {
+	line, ok := d.lineText(int(pos.Line))
+	if !ok {
+		return completionContextNone, ""
+	}
+
+	lineRunes := []rune(line)
+	char := int(pos.Character)
+	if char < 0 {
+		char = 0
+	}
+	if char > len(lineRunes) {
+		char = len(lineRunes)
+	}
+
+	before := string(lineRunes[:char])
+	trimmed := strings.TrimSpace(before)
+	indent := leadingIndentWidth(before)
+
+	if indent == 0 && looksLikeTopLevelContext(trimmed) {
+		return completionContextTopLevel, trailingIdentifierFragment(trimmed)
+	}
+
+	if looksLikeTypeContext(before) {
+		return completionContextType, trailingIdentifierFragment(before)
+	}
+
+	return completionContextNone, ""
+}
+
+func (d *semanticDocument) typeCompletionItems(prefix string) []protocol.CompletionItem {
+	items := make([]protocol.CompletionItem, 0, len(coreTypeCompletions)+len(d.schemaTypeCompletions()))
+	items = append(items, filterCompletionItems(coreTypeCompletions, prefix)...)
+	items = append(items, d.schemaTypeCompletions()...)
+	items = filterCompletionItems(items, prefix)
+	return dedupeCompletionItems(items)
+}
+
+func (d *semanticDocument) schemaTypeCompletions() []protocol.CompletionItem {
+	if d == nil || d.result == nil || d.result.Schema == nil {
+		return nil
+	}
+
+	items := make([]protocol.CompletionItem, 0, len(d.result.Schema.Types))
+	for _, typ := range d.result.Schema.Types {
+		kind := protocol.CompletionItemKindStruct
+		if typ.Kind == schema.TypeKind_Enum {
+			kind = protocol.CompletionItemKindEnum
+		}
+
+		items = append(items, protocol.CompletionItem{
+			Label:         typ.Name,
+			Kind:          kind,
+			Detail:        typ.Kind,
+			InsertText:    typ.Name,
+			SortText:      "2_" + strings.ToLower(typ.Name),
+			FilterText:    typ.Name,
+			Documentation: typeCompletionDocumentation(typ),
+		})
+	}
+	return items
+}
+
+func keywordCompletionItems(prefix string) []protocol.CompletionItem {
+	return filterCompletionItems(topLevelKeywordCompletions, prefix)
+}
+
+func leadingIndentWidth(s string) int {
+	width := 0
+	for _, r := range s {
+		if r == ' ' || r == '\t' {
+			width++
+			continue
+		}
+		break
+	}
+	return width
+}
+
+func looksLikeTopLevelContext(trimmed string) bool {
+	if trimmed == "" {
+		return true
+	}
+	if strings.Contains(trimmed, "=") {
+		return false
+	}
+	return len(strings.Fields(trimmed)) <= 1
+}
+
+func looksLikeTypeContext(before string) bool {
+	trimmed := strings.TrimSpace(before)
+	if trimmed == "" {
+		return false
+	}
+
+	if idx := strings.LastIndex(before, ":"); idx >= 0 {
+		return true
+	}
+
+	fields := strings.Fields(trimmed)
+	if len(fields) < 2 {
+		return false
+	}
+
+	return fields[0] == "enum"
+}
+
+func trailingIdentifierFragment(s string) string {
+	runes := []rune(s)
+	end := len(runes)
+	start := end
+	for start > 0 && isIdentifierRune(runes[start-1]) {
+		start--
+	}
+	if start == end {
+		return ""
+	}
+	return string(runes[start:end])
+}
+
+func filterCompletionItems(items []protocol.CompletionItem, prefix string) []protocol.CompletionItem {
+	if prefix == "" {
+		return append([]protocol.CompletionItem(nil), items...)
+	}
+
+	filtered := make([]protocol.CompletionItem, 0, len(items))
+	for _, item := range items {
+		target := item.FilterText
+		if target == "" {
+			target = item.Label
+		}
+		if strings.HasPrefix(strings.ToLower(target), strings.ToLower(prefix)) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func dedupeCompletionItems(items []protocol.CompletionItem) []protocol.CompletionItem {
+	if len(items) == 0 {
+		return items
+	}
+
+	seen := make(map[string]protocol.CompletionItem, len(items))
+	order := make([]string, 0, len(items))
+	for _, item := range items {
+		key := strings.ToLower(item.Label)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = item
+		order = append(order, key)
+	}
+
+	sort.Strings(order)
+	out := make([]protocol.CompletionItem, 0, len(order))
+	for _, key := range order {
+		out = append(out, seen[key])
+	}
+	return out
+}
+
+func typeCompletionDocumentation(typ *schema.Type) string {
+	if typ == nil {
+		return ""
+	}
+	return typ.Kind + " " + typ.Name
+}
+
+var topLevelKeywordCompletions = []protocol.CompletionItem{
+	keywordCompletionItem("webrpc", "schema version declaration"),
+	keywordCompletionItem("name", "schema name declaration"),
+	keywordCompletionItem("version", "schema version declaration"),
+	keywordCompletionItem("basepath", "basepath declaration"),
+	keywordCompletionItem("import", "import other RIDL files"),
+	keywordCompletionItem("struct", "declare a struct"),
+	keywordCompletionItem("enum", "declare an enum"),
+	keywordCompletionItem("error", "declare an error"),
+	keywordCompletionItem("service", "declare a service"),
+}
+
+var coreTypeCompletions = []protocol.CompletionItem{
+	typeCompletionItem("null", "core type"),
+	typeCompletionItem("any", "core type"),
+	typeCompletionItem("byte", "core type"),
+	typeCompletionItem("bool", "core type"),
+	typeCompletionItem("uint", "core type"),
+	typeCompletionItem("uint8", "core type"),
+	typeCompletionItem("uint16", "core type"),
+	typeCompletionItem("uint32", "core type"),
+	typeCompletionItem("uint64", "core type"),
+	typeCompletionItem("int", "core type"),
+	typeCompletionItem("int8", "core type"),
+	typeCompletionItem("int16", "core type"),
+	typeCompletionItem("int32", "core type"),
+	typeCompletionItem("int64", "core type"),
+	typeCompletionItem("bigint", "core type"),
+	typeCompletionItem("float32", "core type"),
+	typeCompletionItem("float64", "core type"),
+	typeCompletionItem("string", "core type"),
+	typeCompletionItem("timestamp", "core type"),
+	typeCompletionItem("map", "map type"),
+}
+
+func keywordCompletionItem(label, detail string) protocol.CompletionItem {
+	return protocol.CompletionItem{
+		Label:      label,
+		Kind:       protocol.CompletionItemKindKeyword,
+		Detail:     detail,
+		InsertText: label,
+		SortText:   "1_" + label,
+		FilterText: label,
+	}
+}
+
+func typeCompletionItem(label, detail string) protocol.CompletionItem {
+	return protocol.CompletionItem{
+		Label:      label,
+		Kind:       protocol.CompletionItemKindKeyword,
+		Detail:     detail,
+		InsertText: label,
+		SortText:   "1_" + label,
+		FilterText: label,
+	}
 }
 
 func fallbackTokenRange(token *ridl.TokenNode) protocol.Range {

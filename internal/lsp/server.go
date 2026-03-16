@@ -113,7 +113,15 @@ func (s *Server) DidSave(ctx context.Context, params *protocol.DidSaveTextDocume
 }
 
 func (s *Server) Completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
-	return &protocol.CompletionList{}, nil
+	doc, ok := s.docs.Get(string(params.TextDocument.URI))
+	if !ok {
+		return &protocol.CompletionList{Items: []protocol.CompletionItem{}}, nil
+	}
+
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, s.parsePathForNavigation(doc.Path))
+	return &protocol.CompletionList{
+		Items: semanticDoc.completionItemsAt(params.Position),
+	}, nil
 }
 
 func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]any, error) {
