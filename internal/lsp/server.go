@@ -50,6 +50,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			DocumentHighlightProvider:  true,
 			RenameProvider:             true,
 			DocumentSymbolProvider:     true,
+			WorkspaceSymbolProvider:    true,
 			CodeActionProvider: &protocol.CodeActionOptions{
 				CodeActionKinds: []protocol.CodeActionKind{protocol.Source},
 			},

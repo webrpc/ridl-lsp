@@ -103,10 +103,6 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 	return nil, nil
 }
 
-func (s *Server) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolParams) ([]protocol.SymbolInformation, error) {
-	return nil, nil
-}
-
 func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) ([]protocol.Location, error) {
 	return nil, nil
 }
