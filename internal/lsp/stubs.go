@@ -95,10 +95,6 @@ func (s *Server) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCom
 	return nil, nil
 }
 
-func (s *Server) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) ([]protocol.FoldingRange, error) {
-	return nil, nil
-}
-
 func (s *Server) Implementation(ctx context.Context, params *protocol.ImplementationParams) ([]protocol.Location, error) {
 	return nil, nil
 }

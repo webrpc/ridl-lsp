@@ -43,6 +43,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 				TriggerCharacters: []string{":", " ", "-", ".", "(", "<", "+"},
 			},
 			DocumentFormattingProvider: true,
+			FoldingRangeProvider:       true,
 			HoverProvider:              true,
 			DefinitionProvider:         true,
 			ReferencesProvider:         true,
