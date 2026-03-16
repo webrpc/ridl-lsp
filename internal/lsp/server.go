@@ -72,6 +72,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			WorkspaceSymbolProvider:    true,
 			SelectionRangeProvider:     true,
 			LinkedEditingRangeProvider: true,
+			MonikerProvider:            true,
 			DocumentLinkProvider: &protocol.DocumentLinkOptions{
 				ResolveProvider: true,
 			},
