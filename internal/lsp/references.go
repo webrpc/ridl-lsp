@@ -10,7 +10,7 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	ridl "github.com/webrpc/webrpc/schema/ridl"
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 )
 
 func (s *Server) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
@@ -380,7 +380,7 @@ func sameDefinition(a, b *definitionMatch) bool {
 	if a == nil || b == nil || a.token == nil || b.token == nil {
 		return false
 	}
-	return a.path == b.path && a.token.Pos() == b.token.Pos() && a.token.String() == b.token.String()
+	return a.path == b.path && ridl.TokenPos(a.token) == ridl.TokenPos(b.token) && a.token.String() == b.token.String()
 }
 
 func referenceLocationKey(location protocol.Location) string {

@@ -6,8 +6,8 @@ import (
 
 	"go.lsp.dev/protocol"
 
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/webrpc/schema"
-	ridl "github.com/webrpc/webrpc/schema/ridl"
 )
 
 func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]any, error) {
@@ -44,28 +44,28 @@ func (d *semanticDocument) documentSymbols() []protocol.DocumentSymbol {
 
 	for _, enumNode := range d.result.Root.Enums() {
 		positioned = append(positioned, positionedSymbol{
-			start:  enumNode.Name().Pos(),
+			start:  ridl.TokenPos(enumNode.Name()),
 			symbol: d.enumDocumentSymbol(enumNode),
 		})
 	}
 
 	for _, structNode := range d.result.Root.Structs() {
 		positioned = append(positioned, positionedSymbol{
-			start:  structNode.Name().Pos(),
+			start:  ridl.TokenPos(structNode.Name()),
 			symbol: d.structDocumentSymbol(structNode),
 		})
 	}
 
 	for _, errorNode := range d.result.Root.Errors() {
 		positioned = append(positioned, positionedSymbol{
-			start:  errorNode.Name().Pos(),
+			start:  ridl.TokenPos(errorNode.Name()),
 			symbol: d.errorDocumentSymbol(errorNode),
 		})
 	}
 
 	for _, serviceNode := range d.result.Root.Services() {
 		positioned = append(positioned, positionedSymbol{
-			start:  serviceNode.Name().Pos(),
+			start:  ridl.TokenPos(serviceNode.Name()),
 			symbol: d.serviceDocumentSymbol(serviceNode),
 		})
 	}
@@ -309,7 +309,7 @@ func methodRangeBounds(methodNode *ridl.MethodNode) (int, int) {
 }
 
 func validSymbolToken(token *ridl.TokenNode) bool {
-	return token != nil && token.Line() > 0 && token.String() != ""
+	return token != nil && ridl.TokenLine(token) > 0 && token.String() != ""
 }
 
 func rangeContains(outer, inner protocol.Range) bool {

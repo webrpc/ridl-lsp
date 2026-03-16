@@ -7,7 +7,7 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	ridl "github.com/webrpc/webrpc/schema/ridl"
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 )
 
 var semanticTokenLegendTypes = []protocol.SemanticTokenTypes{
@@ -79,14 +79,75 @@ func (d *semanticDocument) semanticTokensDataInRange(rng protocol.Range) []uint3
 		return []uint32{}
 	}
 
+	expanded := d.expandSemanticTokenRange(rng)
+
 	filtered := make([]semanticTokenEntry, 0, len(entries))
 	for _, entry := range entries {
 		if rangesOverlap(entry.rng, rng) {
+			filtered = append(filtered, entry)
+			continue
+		}
+		if rangesOverlap(entry.rng, expanded) && includeExpandedSemanticToken(entry) {
 			filtered = append(filtered, entry)
 		}
 	}
 
 	return semanticTokenData(filtered)
+}
+
+func includeExpandedSemanticToken(entry semanticTokenEntry) bool {
+	if entry.modifiers&semanticTokenModifierBits(protocol.SemanticTokenModifierDeclaration) != 0 {
+		return true
+	}
+
+	switch entry.tokenType {
+	case protocol.SemanticTokenMethod, protocol.SemanticTokenParameter, protocol.SemanticTokenProperty, protocol.SemanticTokenEnumMember:
+		return true
+	default:
+		return false
+	}
+}
+
+func (d *semanticDocument) expandSemanticTokenRange(rng protocol.Range) protocol.Range {
+	lines := strings.Split(d.content, "\n")
+	endLine := int(rng.End.Line)
+	if endLine < 0 || endLine >= len(lines) {
+		return rng
+	}
+
+	if !isSemanticTokenBlockStart(trimmedLine(lines[endLine])) {
+		return rng
+	}
+
+	lastLine := endLine
+	for i := endLine + 1; i < len(lines); i++ {
+		trimmed := trimmedLine(lines[i])
+		if trimmed == "" {
+			lastLine = i
+			continue
+		}
+		if leadingIndentWidth(lines[i]) == 0 {
+			break
+		}
+		lastLine = i
+	}
+
+	return protocol.Range{
+		Start: rng.Start,
+		End: protocol.Position{
+			Line:      uint32(lastLine),
+			Character: lineEndCharacter(lines[lastLine]),
+		},
+	}
+}
+
+func isSemanticTokenBlockStart(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "service ") ||
+		strings.HasPrefix(trimmed, "struct ") ||
+		strings.HasPrefix(trimmed, "enum ") ||
+		strings.HasPrefix(trimmed, "error ") ||
+		trimmed == "import" ||
+		strings.HasPrefix(trimmed, "import ")
 }
 
 func semanticTokenData(entries []semanticTokenEntry) []uint32 {

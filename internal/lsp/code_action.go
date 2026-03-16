@@ -13,8 +13,8 @@ import (
 	"go.lsp.dev/protocol"
 
 	"github.com/webrpc/ridl-lsp/internal/documents"
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/ridl-lsp/internal/workspace"
-	ridl "github.com/webrpc/webrpc/schema/ridl"
 )
 
 func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
@@ -185,7 +185,7 @@ func (s *Server) missingImports(doc *semanticDocument) []missingImport {
 			continue
 		}
 
-		edit, ok := unresolvedImportEdit(doc, importNode.Path().Line()-1)
+		edit, ok := unresolvedImportEdit(doc, ridl.TokenLine(importNode.Path())-1)
 		if !ok {
 			continue
 		}
@@ -213,10 +213,6 @@ func (s *Server) missingImportCandidates(doc *semanticDocument, diagnostics []pr
 	candidates := make([]missingImportCandidate, 0, 4)
 	seen := map[string]struct{}{}
 	for _, unresolved := range doc.unresolvedSymbols(s.resolveTypeDefinition, s.resolveErrorDefinition) {
-		if !diagnosticsContainRange(diagnostics, unresolved.rng) {
-			continue
-		}
-
 		targetPath, ok := s.uniqueImportCandidatePath(doc.path, unresolved.kind, unresolved.name)
 		if !ok || docHasImportedPath(doc, targetPath) {
 			continue
@@ -489,8 +485,8 @@ func missingImportEdit(doc *semanticDocument, importPath string) (protocol.TextE
 			return protocol.TextEdit{}, false
 		}
 
-		firstLine := imports[0].Path().Line() - 1
-		lastLine := imports[len(imports)-1].Path().Line() - 1
+		firstLine := ridl.TokenLine(imports[0].Path()) - 1
+		lastLine := ridl.TokenLine(imports[len(imports)-1].Path()) - 1
 		if firstLine >= 0 && firstLine < len(lines) && strings.HasPrefix(trimmedLine(lines[firstLine]), "import ") {
 			return protocol.TextEdit{
 				Range: lineDeletionRange(doc, lines, firstLine, firstLine+1),

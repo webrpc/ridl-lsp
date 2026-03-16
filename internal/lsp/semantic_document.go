@@ -7,8 +7,8 @@ import (
 
 	"go.lsp.dev/protocol"
 
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/webrpc/schema"
-	ridl "github.com/webrpc/webrpc/schema/ridl"
 )
 
 type semanticDocument struct {
@@ -286,11 +286,11 @@ func (d *semanticDocument) tokenRange(token *ridl.TokenNode, hint protocol.Posit
 }
 
 func (d *semanticDocument) tokenRangeInContent(token *ridl.TokenNode, hint *protocol.Position) (protocol.Range, bool) {
-	if token == nil || token.Line() <= 0 {
+	if token == nil || ridl.TokenLine(token) <= 0 {
 		return protocol.Range{}, false
 	}
 
-	lineIndex := token.Line() - 1
+	lineIndex := ridl.TokenLine(token) - 1
 	line, ok := d.lineText(lineIndex)
 	if !ok {
 		return protocol.Range{}, false
@@ -317,8 +317,8 @@ func (d *semanticDocument) tokenRangeInContent(token *ridl.TokenNode, hint *prot
 		}
 	}
 
-	if start < 0 && token.Col() > 0 {
-		expectedEnd := token.Col()
+	if start < 0 && ridl.TokenCol(token) > 0 {
+		expectedEnd := ridl.TokenCol(token)
 		expectedStart := expectedEnd - len(tokenText)
 		if expectedStart >= 0 && expectedEnd <= len(lineRunes) {
 			if string(lineRunes[expectedStart:expectedEnd]) == string(tokenText) {
@@ -331,10 +331,10 @@ func (d *semanticDocument) tokenRangeInContent(token *ridl.TokenNode, hint *prot
 		start = occurrences[0]
 	}
 
-	if start < 0 && token.Col() > 0 {
+	if start < 0 && ridl.TokenCol(token) > 0 {
 		bestDistance := -1
 		for _, occ := range occurrences {
-			distance := occ + len(tokenText) - token.Col()
+			distance := occ + len(tokenText) - ridl.TokenCol(token)
 			if distance < 0 {
 				distance = -distance
 			}
@@ -837,9 +837,9 @@ func typeCompletionItem(label, detail string) protocol.CompletionItem {
 
 func fallbackTokenRange(token *ridl.TokenNode) protocol.Range {
 	width := uint32(utf8.RuneCountInString(token.String()))
-	startChar := uint32(token.Col()) - width
+	startChar := uint32(ridl.TokenCol(token)) - width
 	start := protocol.Position{
-		Line:      uint32(token.Line() - 1),
+		Line:      uint32(ridl.TokenLine(token) - 1),
 		Character: startChar,
 	}
 	end := protocol.Position{

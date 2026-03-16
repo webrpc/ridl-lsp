@@ -5,7 +5,7 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	ridl "github.com/webrpc/webrpc/schema/ridl"
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 )
 
 const ridlIdentifierWordPattern = `[A-Za-z][A-Za-z0-9_]*`

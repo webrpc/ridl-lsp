@@ -6,8 +6,8 @@ import (
 
 	"go.lsp.dev/protocol"
 
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/webrpc/schema"
-	ridl "github.com/webrpc/webrpc/schema/ridl"
 )
 
 func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {

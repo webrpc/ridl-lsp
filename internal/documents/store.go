@@ -3,7 +3,7 @@ package documents
 import (
 	"sync"
 
-	"github.com/webrpc/webrpc/schema/ridl"
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 )
 
 type Document struct {

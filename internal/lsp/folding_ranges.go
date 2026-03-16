@@ -7,7 +7,7 @@ import (
 
 	"go.lsp.dev/protocol"
 
-	ridl "github.com/webrpc/webrpc/schema/ridl"
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 )
 
 func (s *Server) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) ([]protocol.FoldingRange, error) {
@@ -66,7 +66,7 @@ func (d *semanticDocument) enumFoldingRange(enumNode *ridl.EnumNode) (protocol.F
 		return protocol.FoldingRange{}, false
 	}
 
-	startLine := uint32(enumNode.Name().Line() - 1)
+	startLine := uint32(ridl.TokenLine(enumNode.Name()) - 1)
 	endLine := startLine
 	for _, value := range enumNode.Values() {
 		endLine = maxLine(endLine, definitionEndLine(value))
@@ -86,7 +86,7 @@ func (d *semanticDocument) structFoldingRange(structNode *ridl.StructNode) (prot
 		return protocol.FoldingRange{}, false
 	}
 
-	startLine := uint32(structNode.Name().Line() - 1)
+	startLine := uint32(ridl.TokenLine(structNode.Name()) - 1)
 	endLine := startLine
 	for _, field := range structNode.Fields() {
 		endLine = maxLine(endLine, definitionEndLine(field))
@@ -106,7 +106,7 @@ func (d *semanticDocument) serviceFoldingRange(serviceNode *ridl.ServiceNode) (p
 		return protocol.FoldingRange{}, false
 	}
 
-	startLine := uint32(serviceNode.Name().Line() - 1)
+	startLine := uint32(ridl.TokenLine(serviceNode.Name()) - 1)
 	endLine := startLine
 	for _, method := range serviceNode.Methods() {
 		endLine = maxLine(endLine, methodEndLine(method))
@@ -236,7 +236,7 @@ func tokenLine(token *ridl.TokenNode) uint32 {
 	if !validSymbolToken(token) {
 		return 0
 	}
-	return uint32(token.Line() - 1)
+	return uint32(ridl.TokenLine(token) - 1)
 }
 
 func maxLine(current, candidate uint32) uint32 {
