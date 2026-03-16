@@ -130,6 +130,56 @@ struct ImportedUser
 	assertSemanticToken(t, decoded, "ImportedUser", protocol.SemanticTokenStruct, nil)
 }
 
+func TestSemanticTokensRangeFiltersToRequestedLines(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct User
+  - id: uint64
+
+service TestService
+  - GetUser(id: uint64) => (user: User)
+`
+	path := filepath.Join(dir, "semantic-tokens-range.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	tokens, err := srv.SemanticTokensRange(ctx, &protocol.SemanticTokensRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 7, Character: 0},
+			End:   protocol.Position{Line: 8, Character: 100},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoded := decodeSemanticTokens(t, content, tokens)
+	assertSemanticTokenSorted(t, decoded)
+	assertSemanticToken(t, decoded, "service", protocol.SemanticTokenKeyword, nil)
+	assertSemanticToken(t, decoded, "TestService", protocol.SemanticTokenInterface, []protocol.SemanticTokenModifiers{protocol.SemanticTokenModifierDeclaration})
+	assertSemanticToken(t, decoded, "GetUser", protocol.SemanticTokenMethod, []protocol.SemanticTokenModifiers{protocol.SemanticTokenModifierDeclaration})
+	assertSemanticToken(t, decoded, "user", protocol.SemanticTokenParameter, []protocol.SemanticTokenModifiers{protocol.SemanticTokenModifierDeclaration})
+	assertNoSemanticToken(t, decoded, "struct", protocol.SemanticTokenKeyword)
+	assertNoSemanticToken(t, decoded, "User", protocol.SemanticTokenStruct)
+}
+
 type decodedSemanticToken struct {
 	text      string
 	rng       protocol.Range
@@ -231,6 +281,15 @@ func assertSemanticTokenCount(t *testing.T, tokens []decodedSemanticToken, text 
 	}
 	if count != want {
 		t.Fatalf("expected %d semantic tokens for %q type=%s, got %d in %#v", want, text, tokenType, count, tokens)
+	}
+}
+
+func assertNoSemanticToken(t *testing.T, tokens []decodedSemanticToken, text string, tokenType protocol.SemanticTokenTypes) {
+	t.Helper()
+	for _, token := range tokens {
+		if token.text == text && token.tokenType == tokenType {
+			t.Fatalf("unexpected semantic token %q type=%s in %#v", text, tokenType, tokens)
+		}
 	}
 }
 

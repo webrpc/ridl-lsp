@@ -135,10 +135,6 @@ func (s *Server) SemanticTokensFullDelta(ctx context.Context, params *protocol.S
 	return nil, nil
 }
 
-func (s *Server) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
-	return nil, nil
-}
-
 func (s *Server) SemanticTokensRefresh(ctx context.Context) error {
 	return nil
 }

@@ -47,6 +47,22 @@ func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.Semant
 	}, nil
 }
 
+func (s *Server) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
+	doc, ok := s.docs.Get(string(params.TextDocument.URI))
+	if !ok {
+		return &protocol.SemanticTokens{Data: []uint32{}}, nil
+	}
+
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, s.parsePathForNavigation(doc.Path))
+	if !semanticDoc.valid() {
+		return &protocol.SemanticTokens{Data: []uint32{}}, nil
+	}
+
+	return &protocol.SemanticTokens{
+		Data: semanticDoc.semanticTokensDataInRange(params.Range),
+	}, nil
+}
+
 type semanticTokenEntry struct {
 	rng       protocol.Range
 	tokenType protocol.SemanticTokenTypes
@@ -54,7 +70,26 @@ type semanticTokenEntry struct {
 }
 
 func (d *semanticDocument) semanticTokensData() []uint32 {
+	return semanticTokenData(d.semanticTokenEntries())
+}
+
+func (d *semanticDocument) semanticTokensDataInRange(rng protocol.Range) []uint32 {
 	entries := d.semanticTokenEntries()
+	if len(entries) == 0 {
+		return []uint32{}
+	}
+
+	filtered := make([]semanticTokenEntry, 0, len(entries))
+	for _, entry := range entries {
+		if rangesOverlap(entry.rng, rng) {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	return semanticTokenData(filtered)
+}
+
+func semanticTokenData(entries []semanticTokenEntry) []uint32 {
 	if len(entries) == 0 {
 		return []uint32{}
 	}
