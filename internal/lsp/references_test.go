@@ -186,6 +186,71 @@ service TestService
 	)
 }
 
+func TestReferencesFindSuccinctMethodTypeReferences(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct ListTeamsRequest
+  - page?: uint64
+
+struct ListTeamsResponse
+  - ok: bool
+
+service Teams
+  - ListTeams(ListTeamsRequest) => (ListTeamsResponse)
+`
+	path := filepath.Join(dir, "references-succinct-method.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	locations, err := srv.References(ctx, &protocol.ReferenceParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+			Position:     positionAfter(t, content, "struct "),
+		},
+		Context: protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertReferenceStarts(t, locations,
+		referenceStart{uri: uri, pos: positionAfter(t, content, "struct ")},
+		referenceStart{uri: uri, pos: positionAtOccurrence(t, content, "ListTeamsRequest", 1)},
+	)
+
+	locations, err = srv.References(ctx, &protocol.ReferenceParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+			Position:     positionAtOccurrence(t, content, "ListTeamsResponse", 0),
+		},
+		Context: protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertReferenceStarts(t, locations,
+		referenceStart{uri: uri, pos: positionAtOccurrence(t, content, "ListTeamsResponse", 0)},
+		referenceStart{uri: uri, pos: positionAtOccurrence(t, content, "ListTeamsResponse", 1)},
+	)
+}
+
 type referenceStart struct {
 	uri string
 	pos protocol.Position

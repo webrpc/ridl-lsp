@@ -134,7 +134,7 @@ func (s *Server) missingImportCodeActions(doc *documents.Document, diagnostics [
 	}
 
 	semanticDoc := newSemanticDocument(doc.Path, doc.Content, result)
-	candidates := s.missingImportCandidates(semanticDoc, ridlDiagnostics)
+	candidates := s.missingImportCandidates(semanticDoc)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -205,7 +205,7 @@ func (s *Server) missingImports(doc *semanticDocument) []missingImport {
 	return missing
 }
 
-func (s *Server) missingImportCandidates(doc *semanticDocument, diagnostics []protocol.Diagnostic) []missingImportCandidate {
+func (s *Server) missingImportCandidates(doc *semanticDocument) []missingImportCandidate {
 	if doc == nil || !doc.valid() {
 		return nil
 	}
@@ -320,10 +320,10 @@ func (d *semanticDocument) unresolvedSymbols(
 	for _, serviceNode := range d.result.Root.Services() {
 		for _, methodNode := range serviceNode.Methods() {
 			for _, input := range methodNode.Inputs() {
-				appendTypeRefs(input.TypeName())
+				appendTypeRefs(argumentTypeToken(input))
 			}
 			for _, output := range methodNode.Outputs() {
-				appendTypeRefs(output.TypeName())
+				appendTypeRefs(argumentTypeToken(output))
 			}
 			for _, errorToken := range methodNode.Errors() {
 				appendErrorRef(errorToken)
@@ -451,15 +451,6 @@ func relativeImportPath(sourcePath, targetPath string) (string, bool) {
 	}
 
 	return relPath, true
-}
-
-func diagnosticsContainRange(diagnostics []protocol.Diagnostic, rng protocol.Range) bool {
-	for _, diagnostic := range diagnostics {
-		if rangesOverlap(diagnostic.Range, rng) {
-			return true
-		}
-	}
-	return false
 }
 
 func rangesOverlap(a, b protocol.Range) bool {

@@ -111,7 +111,7 @@ func (d *semanticDocument) selectionRangeAt(pos protocol.Position) *protocol.Sel
 				if d.tokenContainsPosition(input.Name(), pos) {
 					return buildSelectionRangeChain(d.tokenRange(input.Name(), pos), argRange, methodRange, serviceRange)
 				}
-				if selection := d.typeTokenSelectionRange(input.TypeName(), pos, argRange, methodRange, serviceRange); selection != nil {
+				if selection := d.typeTokenSelectionRange(argumentTypeToken(input), pos, argRange, methodRange, serviceRange); selection != nil {
 					return selection
 				}
 			}
@@ -121,7 +121,7 @@ func (d *semanticDocument) selectionRangeAt(pos protocol.Position) *protocol.Sel
 				if d.tokenContainsPosition(output.Name(), pos) {
 					return buildSelectionRangeChain(d.tokenRange(output.Name(), pos), argRange, methodRange, serviceRange)
 				}
-				if selection := d.typeTokenSelectionRange(output.TypeName(), pos, argRange, methodRange, serviceRange); selection != nil {
+				if selection := d.typeTokenSelectionRange(argumentTypeToken(output), pos, argRange, methodRange, serviceRange); selection != nil {
 					return selection
 				}
 			}
@@ -171,15 +171,6 @@ func (d *semanticDocument) typeTokenSelectionRange(token *ridl.TokenNode, pos pr
 	return buildSelectionRangeChain(ranges...)
 }
 
-func (d *semanticDocument) nodeSelectionRange(token *ridl.TokenNode, start, end int) protocol.Range {
-	selection := d.tokenRange(token, protocol.Position{})
-	rng, ok := d.rangeFromOffsets(start, end)
-	if !ok || !rangeContains(rng, selection) {
-		return selection
-	}
-	return rng
-}
-
 func (d *semanticDocument) methodSelectionRange(methodNode *ridl.MethodNode) protocol.Range {
 	startRange := d.tokenRange(methodNode.Name(), protocol.Position{})
 	lineIndex := int(startRange.Start.Line)
@@ -189,12 +180,12 @@ func (d *semanticDocument) methodSelectionRange(methodNode *ridl.MethodNode) pro
 func (d *semanticDocument) argumentSelectionRange(arg *ridl.ArgumentNode) protocol.Range {
 	token := arg.Name()
 	if !validSymbolToken(token) {
-		token = arg.TypeName()
+		token = argumentTypeToken(arg)
 	}
 
 	tokenRange := d.tokenRange(token, protocol.Position{})
 	endChar := tokenRange.End.Character
-	typeRange := d.tokenRange(arg.TypeName(), protocol.Position{})
+	typeRange := d.tokenRange(argumentTypeToken(arg), protocol.Position{})
 	if typeRange.End.Line == tokenRange.Start.Line && typeRange.End.Character > endChar {
 		endChar = typeRange.End.Character
 	}

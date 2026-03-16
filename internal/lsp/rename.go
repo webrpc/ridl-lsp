@@ -141,25 +141,27 @@ func (d *semanticDocument) renameTargetAt(
 	for _, serviceNode := range d.result.Root.Services() {
 		for _, methodNode := range serviceNode.Methods() {
 			for _, input := range methodNode.Inputs() {
-				if d.tokenContainsPosition(input.TypeName(), pos) {
-					name := d.identifierAtTokenPosition(input.TypeName(), pos)
+				typeToken := argumentTypeToken(input)
+				if d.tokenContainsPosition(typeToken, pos) {
+					name := d.identifierAtTokenPosition(typeToken, pos)
 					if name == "" || isBuiltInRIDLType(name) {
 						return nil, nil
 					}
 					if definition := resolveType(d.path, d.result, name); definition != nil {
-						rng := d.identifierRangeInToken(input.TypeName(), pos, name)
+						rng := d.identifierRangeInToken(typeToken, pos, name)
 						return &referenceTarget{kind: referenceKindType, name: name, definition: definition}, &rng
 					}
 				}
 			}
 			for _, output := range methodNode.Outputs() {
-				if d.tokenContainsPosition(output.TypeName(), pos) {
-					name := d.identifierAtTokenPosition(output.TypeName(), pos)
+				typeToken := argumentTypeToken(output)
+				if d.tokenContainsPosition(typeToken, pos) {
+					name := d.identifierAtTokenPosition(typeToken, pos)
 					if name == "" || isBuiltInRIDLType(name) {
 						return nil, nil
 					}
 					if definition := resolveType(d.path, d.result, name); definition != nil {
-						rng := d.identifierRangeInToken(output.TypeName(), pos, name)
+						rng := d.identifierRangeInToken(typeToken, pos, name)
 						return &referenceTarget{kind: referenceKindType, name: name, definition: definition}, &rng
 					}
 				}

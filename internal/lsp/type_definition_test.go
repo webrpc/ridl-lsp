@@ -193,3 +193,58 @@ struct User
 		t.Fatalf("expected no type-definition locations for declaration, got %#v", locations)
 	}
 }
+
+func TestTypeDefinitionResolvesSuccinctMethodTypes(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct UserRequest
+  - id: uint64
+
+struct UserResponse
+  - id: uint64
+
+service TestService
+  - GetUser(UserRequest) => (UserResponse)
+`
+	path := filepath.Join(dir, "type-definition-succinct-method.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	locations, err := srv.TypeDefinition(ctx, &protocol.TypeDefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+			Position:     positionAtOccurrence(t, content, "UserRequest", 1),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSingleDefinition(t, locations, uri, positionAt(t, content, "UserRequest"))
+
+	locations, err = srv.TypeDefinition(ctx, &protocol.TypeDefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+			Position:     positionAtOccurrence(t, content, "UserResponse", 1),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSingleDefinition(t, locations, uri, positionAt(t, content, "UserResponse"))
+}

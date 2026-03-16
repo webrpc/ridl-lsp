@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"go.lsp.dev/protocol"
-
 	"github.com/webrpc/webrpc/schema"
+	"go.lsp.dev/protocol"
 )
 
 func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {

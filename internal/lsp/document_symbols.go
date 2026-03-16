@@ -4,10 +4,10 @@ import (
 	"context"
 	"sort"
 
+	"github.com/webrpc/webrpc/schema"
 	"go.lsp.dev/protocol"
 
 	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
-	"github.com/webrpc/webrpc/schema"
 )
 
 func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]any, error) {
@@ -295,11 +295,11 @@ func methodRangeBounds(methodNode *ridl.MethodNode) (int, int) {
 
 	for _, input := range methodNode.Inputs() {
 		extend(input.Name())
-		extend(input.TypeName())
+		extend(argumentTypeToken(input))
 	}
 	for _, output := range methodNode.Outputs() {
 		extend(output.Name())
-		extend(output.TypeName())
+		extend(argumentTypeToken(output))
 	}
 	for _, errorToken := range methodNode.Errors() {
 		extend(errorToken)

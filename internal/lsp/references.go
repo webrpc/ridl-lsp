@@ -101,16 +101,18 @@ func (d *semanticDocument) referenceTargetAt(
 	for _, serviceNode := range d.result.Root.Services() {
 		for _, methodNode := range serviceNode.Methods() {
 			for _, input := range methodNode.Inputs() {
-				if d.tokenContainsPosition(input.TypeName(), pos) {
-					name := d.identifierAtTokenPosition(input.TypeName(), pos)
+				typeToken := argumentTypeToken(input)
+				if d.tokenContainsPosition(typeToken, pos) {
+					name := d.identifierAtTokenPosition(typeToken, pos)
 					if definition := resolveType(d.path, d.result, name); definition != nil {
 						return &referenceTarget{kind: referenceKindType, name: name, definition: definition}
 					}
 				}
 			}
 			for _, output := range methodNode.Outputs() {
-				if d.tokenContainsPosition(output.TypeName(), pos) {
-					name := d.identifierAtTokenPosition(output.TypeName(), pos)
+				typeToken := argumentTypeToken(output)
+				if d.tokenContainsPosition(typeToken, pos) {
+					name := d.identifierAtTokenPosition(typeToken, pos)
 					if definition := resolveType(d.path, d.result, name); definition != nil {
 						return &referenceTarget{kind: referenceKindType, name: name, definition: definition}
 					}
@@ -199,10 +201,10 @@ func (d *semanticDocument) referenceLocations(
 		for _, methodNode := range serviceNode.Methods() {
 			if target.kind == referenceKindType {
 				for _, input := range methodNode.Inputs() {
-					appendResolvedTypeRefs(input.TypeName())
+					appendResolvedTypeRefs(argumentTypeToken(input))
 				}
 				for _, output := range methodNode.Outputs() {
-					appendResolvedTypeRefs(output.TypeName())
+					appendResolvedTypeRefs(argumentTypeToken(output))
 				}
 			}
 			if target.kind == referenceKindError {

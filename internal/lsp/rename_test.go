@@ -237,6 +237,58 @@ service TestService
 	}
 }
 
+func TestRenameUpdatesSuccinctMethodTypes(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct ListTeamsRequest
+  - page?: uint64
+
+struct ListTeamsResponse
+  - ok: bool
+
+service Teams
+  - ListTeams(ListTeamsRequest) => (ListTeamsResponse)
+`
+	path := filepath.Join(dir, "rename-succinct-method.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	edit, err := srv.Rename(ctx, &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+			Position:     positionAfter(t, content, "struct "),
+		},
+		NewName: "TeamsPageRequest",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edit == nil {
+		t.Fatal("expected workspace edit")
+	}
+
+	assertWorkspaceEdits(t, edit,
+		editExpectation{uri: uri, pos: positionAfter(t, content, "struct "), newText: "TeamsPageRequest"},
+		editExpectation{uri: uri, pos: positionAtOccurrence(t, content, "ListTeamsRequest", 1), newText: "TeamsPageRequest"},
+	)
+}
+
 type editExpectation struct {
 	uri     string
 	pos     protocol.Position

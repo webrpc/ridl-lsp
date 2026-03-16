@@ -224,6 +224,50 @@ struct User
 	assertSemanticToken(t, decoded, "User", protocol.SemanticTokenStruct, []protocol.SemanticTokenModifiers{protocol.SemanticTokenModifierDeclaration})
 }
 
+func TestSemanticTokensClassifySuccinctMethodTypes(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct UserRequest
+  - id: uint64
+
+struct UserResponse
+  - id: uint64
+
+service TestService
+  - GetUser(UserRequest) => (UserResponse)
+`
+	path := filepath.Join(dir, "semantic-tokens-succinct.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	tokens, err := srv.SemanticTokensFull(ctx, &protocol.SemanticTokensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoded := decodeSemanticTokens(t, content, tokens)
+	assertSemanticTokenCount(t, decoded, "UserRequest", protocol.SemanticTokenStruct, 2)
+	assertSemanticTokenCount(t, decoded, "UserResponse", protocol.SemanticTokenStruct, 2)
+}
+
 type decodedSemanticToken struct {
 	text      string
 	rng       protocol.Range

@@ -5,10 +5,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/webrpc/webrpc/schema"
 	"go.lsp.dev/protocol"
 
 	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
-	"github.com/webrpc/webrpc/schema"
 )
 
 type semanticDocument struct {
@@ -143,8 +143,9 @@ func (d *semanticDocument) hoverAt(pos protocol.Position) *hoverMatch {
 					return match
 				}
 
-				if match := d.hoverForToken(input.TypeName(), pos, func() string {
-					return d.formatTypeTokenHover(input.TypeName(), pos)
+				typeToken := argumentTypeToken(input)
+				if match := d.hoverForToken(typeToken, pos, func() string {
+					return d.formatTypeTokenHover(typeToken, pos)
 				}); match != nil {
 					return match
 				}
@@ -157,8 +158,9 @@ func (d *semanticDocument) hoverAt(pos protocol.Position) *hoverMatch {
 					return match
 				}
 
-				if match := d.hoverForToken(output.TypeName(), pos, func() string {
-					return d.formatTypeTokenHover(output.TypeName(), pos)
+				typeToken := argumentTypeToken(output)
+				if match := d.hoverForToken(typeToken, pos, func() string {
+					return d.formatTypeTokenHover(typeToken, pos)
 				}); match != nil {
 					return match
 				}
@@ -233,16 +235,18 @@ func (d *semanticDocument) definitionAt(
 				if d.tokenContainsPosition(input.Name(), pos) {
 					return definitionForToken(d.path, input.Name())
 				}
-				if d.tokenContainsPosition(input.TypeName(), pos) {
-					return resolveType(d.path, d.result, d.identifierAtTokenPosition(input.TypeName(), pos))
+				typeToken := argumentTypeToken(input)
+				if d.tokenContainsPosition(typeToken, pos) {
+					return resolveType(d.path, d.result, d.identifierAtTokenPosition(typeToken, pos))
 				}
 			}
 			for _, output := range methodNode.Outputs() {
 				if d.tokenContainsPosition(output.Name(), pos) {
 					return definitionForToken(d.path, output.Name())
 				}
-				if d.tokenContainsPosition(output.TypeName(), pos) {
-					return resolveType(d.path, d.result, d.identifierAtTokenPosition(output.TypeName(), pos))
+				typeToken := argumentTypeToken(output)
+				if d.tokenContainsPosition(typeToken, pos) {
+					return resolveType(d.path, d.result, d.identifierAtTokenPosition(typeToken, pos))
 				}
 			}
 			for _, errorToken := range methodNode.Errors() {

@@ -4,9 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"go.lsp.dev/protocol"
-
 	"github.com/webrpc/ridlfmt/formatter"
+	"go.lsp.dev/protocol"
 )
 
 func (s *Server) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {

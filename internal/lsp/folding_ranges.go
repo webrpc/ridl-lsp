@@ -213,11 +213,11 @@ func methodEndLine(method *ridl.MethodNode) uint32 {
 	endLine := tokenLine(method.Name())
 	for _, input := range method.Inputs() {
 		endLine = maxLine(endLine, tokenLine(input.Name()))
-		endLine = maxLine(endLine, tokenLine(input.TypeName()))
+		endLine = maxLine(endLine, tokenLine(argumentTypeToken(input)))
 	}
 	for _, output := range method.Outputs() {
 		endLine = maxLine(endLine, tokenLine(output.Name()))
-		endLine = maxLine(endLine, tokenLine(output.TypeName()))
+		endLine = maxLine(endLine, tokenLine(argumentTypeToken(output)))
 	}
 	for _, errorToken := range method.Errors() {
 		endLine = maxLine(endLine, tokenLine(errorToken))

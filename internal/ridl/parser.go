@@ -72,6 +72,14 @@ type upstreamErrorNode struct {
 	httpStatus *TokenNode
 }
 
+type upstreamArgumentNode struct {
+	node         upstreamNode
+	name         *TokenNode
+	argumentType *TokenNode
+	optional     bool
+	inlineStruct *TokenNode
+}
+
 //go:linkname newUpstreamParser github.com/webrpc/webrpc/schema/ridl.newParser
 func newUpstreamParser(file string, src []byte) (*upstreamParser, error)
 
@@ -128,6 +136,18 @@ func ErrorHTTPStatusToken(node *ErrorNode) *TokenNode {
 		return nil
 	}
 	return (*upstreamErrorNode)(unsafe.Pointer(node)).httpStatus
+}
+
+func ArgumentTypeToken(node *ArgumentNode) *TokenNode {
+	if node == nil {
+		return nil
+	}
+
+	if token := node.TypeName(); token != nil && token.String() != "" {
+		return token
+	}
+
+	return (*upstreamArgumentNode)(unsafe.Pointer(node)).inlineStruct
 }
 
 // Parser wraps the upstream RIDL parser, providing an overlay-aware filesystem
@@ -377,10 +397,15 @@ func partialMethodArgument(arg *ArgumentNode) *schema.MethodArgument {
 		return &schema.MethodArgument{Type: &schema.VarType{}}
 	}
 
+	typeExpr := ""
+	if token := ArgumentTypeToken(arg); token != nil {
+		typeExpr = token.String()
+	}
+
 	return &schema.MethodArgument{
 		Name:     arg.Name().String(),
 		Optional: arg.Optional(),
-		Type:     &schema.VarType{Expr: arg.TypeName().String()},
+		Type:     &schema.VarType{Expr: typeExpr},
 	}
 }
 

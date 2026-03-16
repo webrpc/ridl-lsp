@@ -56,18 +56,20 @@ func (d *semanticDocument) typeDefinitionAt(
 		for _, methodNode := range serviceNode.Methods() {
 			for _, input := range methodNode.Inputs() {
 				if d.tokenContainsPosition(input.Name(), pos) {
-					return d.firstResolvableTypeDefinition(input.TypeName(), resolveType)
+					return d.firstResolvableTypeDefinition(argumentTypeToken(input), resolveType)
 				}
-				if d.tokenContainsPosition(input.TypeName(), pos) {
-					return d.typeDefinitionFromToken(input.TypeName(), pos, resolveType)
+				typeToken := argumentTypeToken(input)
+				if d.tokenContainsPosition(typeToken, pos) {
+					return d.typeDefinitionFromToken(typeToken, pos, resolveType)
 				}
 			}
 			for _, output := range methodNode.Outputs() {
 				if d.tokenContainsPosition(output.Name(), pos) {
-					return d.firstResolvableTypeDefinition(output.TypeName(), resolveType)
+					return d.firstResolvableTypeDefinition(argumentTypeToken(output), resolveType)
 				}
-				if d.tokenContainsPosition(output.TypeName(), pos) {
-					return d.typeDefinitionFromToken(output.TypeName(), pos, resolveType)
+				typeToken := argumentTypeToken(output)
+				if d.tokenContainsPosition(typeToken, pos) {
+					return d.typeDefinitionFromToken(typeToken, pos, resolveType)
 				}
 			}
 		}

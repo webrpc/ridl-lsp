@@ -208,17 +208,13 @@ func (d *semanticDocument) semanticTokenEntries() []semanticTokenEntry {
 
 	for _, enumNode := range d.result.Root.Enums() {
 		addToken(d.tokenRange(enumNode.Name(), protocol.Position{}), protocol.SemanticTokenEnum, protocol.SemanticTokenModifierDeclaration)
-		for _, token := range d.typeExprSemanticTokens(enumNode.TypeName()) {
-			entries = append(entries, token)
-		}
+		entries = append(entries, d.typeExprSemanticTokens(enumNode.TypeName())...)
 	}
 
 	for _, structNode := range d.result.Root.Structs() {
 		addToken(d.tokenRange(structNode.Name(), protocol.Position{}), protocol.SemanticTokenStruct, protocol.SemanticTokenModifierDeclaration)
 		for _, field := range structNode.Fields() {
-			for _, token := range d.typeExprSemanticTokens(field.Right()) {
-				entries = append(entries, token)
-			}
+			entries = append(entries, d.typeExprSemanticTokens(field.Right())...)
 		}
 	}
 
@@ -234,17 +230,13 @@ func (d *semanticDocument) semanticTokenEntries() []semanticTokenEntry {
 				if validSymbolToken(input.Name()) {
 					addToken(d.tokenRange(input.Name(), protocol.Position{}), protocol.SemanticTokenParameter, protocol.SemanticTokenModifierDeclaration)
 				}
-				for _, token := range d.typeExprSemanticTokens(input.TypeName()) {
-					entries = append(entries, token)
-				}
+				entries = append(entries, d.typeExprSemanticTokens(argumentTypeToken(input))...)
 			}
 			for _, output := range methodNode.Outputs() {
 				if validSymbolToken(output.Name()) {
 					addToken(d.tokenRange(output.Name(), protocol.Position{}), protocol.SemanticTokenParameter, protocol.SemanticTokenModifierDeclaration)
 				}
-				for _, token := range d.typeExprSemanticTokens(output.TypeName()) {
-					entries = append(entries, token)
-				}
+				entries = append(entries, d.typeExprSemanticTokens(argumentTypeToken(output))...)
 			}
 			for _, errorToken := range methodNode.Errors() {
 				if !validSymbolToken(errorToken) {
