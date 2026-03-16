@@ -29,43 +29,7 @@ func (s *Server) References(ctx context.Context, params *protocol.ReferenceParam
 		return nil, nil
 	}
 
-	includeDeclaration := params.Context.IncludeDeclaration
-	locations := make([]protocol.Location, 0, 8)
-	seen := map[string]struct{}{}
-
-	for _, path := range s.referenceCandidatePaths() {
-		result := s.parsePathForNavigation(path)
-		if result == nil || result.Root == nil {
-			continue
-		}
-
-		content, ok := s.contentForPath(path)
-		if !ok {
-			continue
-		}
-
-		doc := newSemanticDocument(path, content, result)
-		for _, location := range doc.referenceLocations(target, s.resolveTypeDefinition, s.resolveErrorDefinition, includeDeclaration) {
-			key := referenceLocationKey(location)
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			locations = append(locations, location)
-		}
-	}
-
-	sort.SliceStable(locations, func(i, j int) bool {
-		if locations[i].URI != locations[j].URI {
-			return string(locations[i].URI) < string(locations[j].URI)
-		}
-		if locations[i].Range.Start.Line != locations[j].Range.Start.Line {
-			return locations[i].Range.Start.Line < locations[j].Range.Start.Line
-		}
-		return locations[i].Range.Start.Character < locations[j].Range.Start.Character
-	})
-
-	return locations, nil
+	return s.collectReferenceLocations(target, params.Context.IncludeDeclaration), nil
 }
 
 type referenceKind int
@@ -301,6 +265,25 @@ func (d *semanticDocument) identifierRangesInToken(token *ridl.TokenNode, name s
 	return ranges
 }
 
+func (d *semanticDocument) identifierRangeInToken(token *ridl.TokenNode, pos protocol.Position, name string) protocol.Range {
+	if token == nil || name == "" {
+		return fallbackTokenRange(token)
+	}
+
+	for _, rng := range d.identifierRangesInToken(token, name) {
+		if pos.Line == rng.Start.Line && pos.Character >= rng.Start.Character && pos.Character < rng.End.Character {
+			return rng
+		}
+	}
+
+	ranges := d.identifierRangesInToken(token, name)
+	if len(ranges) > 0 {
+		return ranges[0]
+	}
+
+	return d.tokenRange(token, pos)
+}
+
 func (s *Server) referenceCandidatePaths() []string {
 	seen := map[string]struct{}{}
 	paths := make([]string, 0, len(s.docs.All()))
@@ -336,6 +319,49 @@ func (s *Server) referenceCandidatePaths() []string {
 
 	sort.Strings(paths)
 	return paths
+}
+
+func (s *Server) collectReferenceLocations(target *referenceTarget, includeDeclaration bool) []protocol.Location {
+	if target == nil || target.definition == nil {
+		return nil
+	}
+
+	locations := make([]protocol.Location, 0, 8)
+	seen := map[string]struct{}{}
+
+	for _, path := range s.referenceCandidatePaths() {
+		result := s.parsePathForNavigation(path)
+		if result == nil || result.Root == nil {
+			continue
+		}
+
+		content, ok := s.contentForPath(path)
+		if !ok {
+			continue
+		}
+
+		doc := newSemanticDocument(path, content, result)
+		for _, location := range doc.referenceLocations(target, s.resolveTypeDefinition, s.resolveErrorDefinition, includeDeclaration) {
+			key := referenceLocationKey(location)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			locations = append(locations, location)
+		}
+	}
+
+	sort.SliceStable(locations, func(i, j int) bool {
+		if locations[i].URI != locations[j].URI {
+			return string(locations[i].URI) < string(locations[j].URI)
+		}
+		if locations[i].Range.Start.Line != locations[j].Range.Start.Line {
+			return locations[i].Range.Start.Line < locations[j].Range.Start.Line
+		}
+		return locations[i].Range.Start.Character < locations[j].Range.Start.Character
+	})
+
+	return locations
 }
 
 func (s *Server) contentForPath(path string) (string, bool) {

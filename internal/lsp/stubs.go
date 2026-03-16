@@ -111,15 +111,7 @@ func (s *Server) OnTypeFormatting(ctx context.Context, params *protocol.Document
 	return nil, nil
 }
 
-func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (*protocol.Range, error) {
-	return nil, nil
-}
-
 func (s *Server) RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) ([]protocol.TextEdit, error) {
-	return nil, nil
-}
-
-func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
 	return nil, nil
 }
 
