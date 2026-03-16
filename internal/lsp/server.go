@@ -123,7 +123,3 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		Items: semanticDoc.completionItemsAt(params.Position),
 	}, nil
 }
-
-func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]any, error) {
-	return []any{}, nil
-}
