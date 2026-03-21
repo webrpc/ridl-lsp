@@ -9,7 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/webrpc/webrpc/schema"
-	upridl "github.com/webrpc/webrpc/schema/ridl"
+	"github.com/webrpc/webrpc/schema/ridl"
 )
 
 type ParseResult struct {
@@ -18,20 +18,21 @@ type ParseResult struct {
 	Errors []error
 }
 
-type RootNode = upridl.RootNode
-type TokenNode = upridl.TokenNode
-type DefinitionNode = upridl.DefinitionNode
-type ImportNode = upridl.ImportNode
-type EnumNode = upridl.EnumNode
-type StructNode = upridl.StructNode
-type ErrorNode = upridl.ErrorNode
-type ArgumentNode = upridl.ArgumentNode
-type AnnotationNode = upridl.AnnotationNode
-type MethodNode = upridl.MethodNode
-type ServiceNode = upridl.ServiceNode
+type RootNode = ridl.RootNode
+type TokenNode = ridl.TokenNode
+type DefinitionNode = ridl.DefinitionNode
+type ImportNode = ridl.ImportNode
+type EnumNode = ridl.EnumNode
+type StructNode = ridl.StructNode
+type ErrorNode = ridl.ErrorNode
+type ArgumentNode = ridl.ArgumentNode
+type AnnotationNode = ridl.AnnotationNode
+type MethodNode = ridl.MethodNode
+type ServiceNode = ridl.ServiceNode
+type TypeAliasNode = ridl.TypeAliasNode
 
 type upstreamNode struct {
-	children []upridl.Node
+	children []ridl.Node
 	start    int
 	end      int
 }
@@ -196,7 +197,7 @@ func (p *Parser) parse(workspace, path string, overlays map[string]string, visit
 	imported := len(visited) > 0
 	result.Schema = p.buildPartialSchema(workspace, path, result.Root, overlays, visited)
 
-	schemaDoc, err := upridl.NewParser(fsys, root, relPath).Parse()
+	schemaDoc, err := ridl.NewParser(fsys, root, relPath).Parse()
 	if err != nil {
 		if isVersionOptionalSchemaError(err, imported) {
 			return result, nil
@@ -328,6 +329,19 @@ func (p *Parser) buildPartialSchema(workspace, path string, root *RootNode, over
 		}
 
 		doc.Types = append(doc.Types, structType)
+	}
+
+	for _, aliasNode := range root.TypeAliases() {
+		if aliasNode == nil || aliasNode.Name() == nil || aliasNode.Name().String() == "" {
+			continue
+		}
+
+		doc.Types = append(doc.Types, &schema.Type{
+			Kind:     schema.TypeKind_Alias,
+			Name:     aliasNode.Name().String(),
+			Type:     &schema.VarType{Expr: aliasNode.TypeName().String()},
+			Comments: commentLines(aliasNode.Comments()),
+		})
 	}
 
 	for _, errorNode := range root.Errors() {
