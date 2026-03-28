@@ -1,4 +1,9 @@
-.PHONY: install lint test
+.PHONY: all build install lint test install-claude-plugin uninstall-claude-plugin
+
+all: build test lint
+
+build:
+	go build -o ./bin/ridl-lsp ./cmd/ridl-lsp
 
 install:
 	go install ./cmd/ridl-lsp
@@ -8,3 +13,9 @@ lint:
 
 test:
 	go test ./...
+
+install-claude-plugin:
+	@bash scripts/install-claude-plugin.sh
+
+uninstall-claude-plugin:
+	@bash scripts/install-claude-plugin.sh --uninstall
