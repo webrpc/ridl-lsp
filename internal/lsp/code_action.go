@@ -15,6 +15,7 @@ import (
 	"github.com/webrpc/ridl-lsp/internal/documents"
 	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/ridl-lsp/internal/workspace"
+	"github.com/webrpc/webrpc/schema"
 )
 
 func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
@@ -28,6 +29,8 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 		if doc, ok := s.docs.Get(string(params.TextDocument.URI)); ok {
 			actions = append(actions, s.unresolvedImportCodeActions(doc, params.Context.Diagnostics)...)
 			actions = append(actions, s.missingImportCodeActions(doc, params.Context.Diagnostics)...)
+			actions = append(actions, s.narrowImportCodeActions(doc, params.Context.Diagnostics)...)
+			actions = append(actions, s.transitiveReImportCodeActions(doc, params.Context.Diagnostics)...)
 		}
 	}
 
@@ -317,6 +320,10 @@ func (d *semanticDocument) unresolvedSymbols(
 		}
 	}
 
+	for _, aliasNode := range d.result.Root.TypeAliases() {
+		appendTypeRefs(aliasNode.TypeName())
+	}
+
 	for _, serviceNode := range d.result.Root.Services() {
 		for _, methodNode := range serviceNode.Methods() {
 			for _, input := range methodNode.Inputs() {
@@ -342,6 +349,96 @@ func (d *semanticDocument) unresolvedSymbols(
 	})
 
 	return symbols
+}
+
+func locallyDefinedNames(root *ridl.RootNode) map[string]struct{} {
+	names := map[string]struct{}{}
+	if root == nil {
+		return names
+	}
+	for _, enumNode := range root.Enums() {
+		if enumNode != nil && enumNode.Name() != nil && enumNode.Name().String() != "" {
+			names[enumNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, structNode := range root.Structs() {
+		if structNode != nil && structNode.Name() != nil && structNode.Name().String() != "" {
+			names[structNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, errorNode := range root.Errors() {
+		if errorNode != nil && errorNode.Name() != nil && errorNode.Name().String() != "" {
+			names[errorNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, aliasNode := range root.TypeAliases() {
+		if aliasNode != nil && aliasNode.Name() != nil && aliasNode.Name().String() != "" {
+			names[aliasNode.Name().String()] = struct{}{}
+		}
+	}
+	return names
+}
+
+func (d *semanticDocument) referencedNames() map[string]struct{} {
+	names := map[string]struct{}{}
+	if d == nil || !d.valid() {
+		return names
+	}
+
+	addTypeRefs := func(token *ridl.TokenNode) {
+		if token == nil {
+			return
+		}
+		for _, name := range unresolvedTypeNames(token.String()) {
+			if !isBuiltInRIDLType(name) {
+				names[name] = struct{}{}
+			}
+		}
+	}
+
+	addErrorRef := func(token *ridl.TokenNode) {
+		if token != nil && token.String() != "" {
+			names[token.String()] = struct{}{}
+		}
+	}
+
+	for _, enumNode := range d.result.Root.Enums() {
+		addTypeRefs(enumNode.TypeName())
+		for _, value := range enumNode.Values() {
+			addTypeRefs(value.Right())
+		}
+	}
+
+	for _, structNode := range d.result.Root.Structs() {
+		for _, field := range structNode.Fields() {
+			addTypeRefs(field.Right())
+		}
+	}
+
+	for _, aliasNode := range d.result.Root.TypeAliases() {
+		addTypeRefs(aliasNode.TypeName())
+	}
+
+	for _, serviceNode := range d.result.Root.Services() {
+		for _, methodNode := range serviceNode.Methods() {
+			for _, input := range methodNode.Inputs() {
+				addTypeRefs(argumentTypeToken(input))
+			}
+			for _, output := range methodNode.Outputs() {
+				addTypeRefs(argumentTypeToken(output))
+			}
+			for _, errorToken := range methodNode.Errors() {
+				addErrorRef(errorToken)
+			}
+		}
+	}
+
+	// Remove locally defined names — we only want external references.
+	for name := range locallyDefinedNames(d.result.Root) {
+		delete(names, name)
+	}
+
+	return names
 }
 
 func unresolvedTypeNames(expr string) []string {
@@ -378,7 +475,7 @@ func unresolvedTypeNames(expr string) []string {
 }
 
 func (s *Server) uniqueImportCandidatePath(docPath string, kind referenceKind, name string) (string, bool) {
-	matches := make([]string, 0, 2)
+	var definers, reExporters []string
 	seen := map[string]struct{}{}
 
 	for _, path := range s.referenceCandidatePaths() {
@@ -391,6 +488,12 @@ func (s *Server) uniqueImportCandidatePath(docPath string, kind referenceKind, n
 			continue
 		}
 
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+
+		// Check if name is locally defined in this file's AST (not via imports).
 		var token *ridl.TokenNode
 		switch kind {
 		case referenceKindType:
@@ -398,24 +501,46 @@ func (s *Server) uniqueImportCandidatePath(docPath string, kind referenceKind, n
 		case referenceKindError:
 			token = findErrorDefinitionToken(result.Root, name)
 		}
-		if token == nil {
+
+		if token != nil {
+			definers = append(definers, path)
 			continue
 		}
 
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		matches = append(matches, path)
-		if len(matches) > 1 {
-			return "", false
+		// Check if the name is available through this file's resolved schema
+		// (i.e., it re-exports the name via imports).
+		if result.Schema != nil && schemaHasName(result.Schema, kind, name) {
+			reExporters = append(reExporters, path)
 		}
 	}
 
-	if len(matches) != 1 {
+	// Prefer the unique definer.
+	if len(definers) == 1 {
+		return definers[0], true
+	}
+	if len(definers) > 1 {
 		return "", false
 	}
-	return matches[0], true
+
+	// Fall back to re-exporters only if no definer found.
+	if len(reExporters) == 1 {
+		return reExporters[0], true
+	}
+	return "", false
+}
+
+func schemaHasName(s *schema.WebRPCSchema, kind referenceKind, name string) bool {
+	switch kind {
+	case referenceKindType:
+		return s.GetTypeByName(name) != nil
+	case referenceKindError:
+		for _, e := range s.Errors {
+			if strings.EqualFold(e.Name, name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func docHasImportedPath(doc *semanticDocument, targetPath string) bool {
@@ -707,4 +832,276 @@ func positionKey(pos protocol.Position) string {
 
 func intString[T ~uint32 | ~int](value T) string {
 	return strconv.Itoa(int(value))
+}
+
+func (s *Server) narrowImportCodeActions(doc *documents.Document, diagnostics []protocol.Diagnostic) []protocol.CodeAction {
+	if doc == nil || doc.Result == nil || doc.Result.Root == nil {
+		return nil
+	}
+
+	var actions []protocol.CodeAction
+	for _, diag := range diagnostics {
+		if diag.Source != "ridl" || diag.Severity != protocol.DiagnosticSeverityWarning {
+			continue
+		}
+
+		isUnused := strings.Contains(diag.Message, "is unused")
+		isNarrowable := strings.Contains(diag.Message, "can be narrowed")
+		if !isUnused && !isNarrowable {
+			continue
+		}
+
+		lineIndex := int(diag.Range.Start.Line)
+		semanticDoc := newSemanticDocument(doc.Path, doc.Content, doc.Result)
+
+		if isUnused {
+			edit, ok := unresolvedImportEdit(semanticDoc, lineIndex)
+			if !ok {
+				continue
+			}
+			importPath := extractQuotedString(diag.Message)
+			actions = append(actions, protocol.CodeAction{
+				Title:       `Remove unused import "` + importPath + `"`,
+				Kind:        protocol.QuickFix,
+				Diagnostics: []protocol.Diagnostic{diag},
+				IsPreferred: true,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+						protocol.DocumentURI(doc.URI): {edit},
+					},
+				},
+			})
+			continue
+		}
+
+		importPath := extractQuotedString(diag.Message)
+		idx := strings.Index(diag.Message, "can be narrowed to: ")
+		if idx < 0 {
+			continue
+		}
+		nameList := diag.Message[idx+len("can be narrowed to: "):]
+		names := strings.Split(nameList, ", ")
+
+		lines := splitContentLines(doc.Content)
+		if lineIndex < 0 || lineIndex >= len(lines) {
+			continue
+		}
+
+		// Build the inline selective import replacement.
+		var memberLines string
+		for _, name := range names {
+			memberLines += "  - " + name + "\n"
+		}
+		newImport := "import " + importPath + "\n" + memberLines
+
+		trimmed := trimmedLine(lines[lineIndex])
+
+		var edits []protocol.TextEdit
+		if strings.HasPrefix(trimmed, "import ") {
+			// Already inline form: replace the import line with inline selective.
+			edits = append(edits, protocol.TextEdit{
+				Range:   lineDeletionRange(semanticDoc, lines, lineIndex, lineIndex+1),
+				NewText: newImport,
+			})
+		} else if strings.HasPrefix(trimmed, "- ") {
+			// Block form item (  - path.ridl): figure out how to replace it.
+			headerLine, itemCount, ok := importBlockInfo(lines, lineIndex)
+			if !ok {
+				continue
+			}
+
+			if itemCount == 1 {
+				// Only item in block — replace entire block with inline selective.
+				endLine := lineIndex + 1
+				// Preserve trailing blank line separation.
+				hasTrailingBlank := endLine < len(lines) && trimmedLine(lines[endLine]) == ""
+				if hasTrailingBlank {
+					endLine++
+				}
+				suffix := ""
+				if hasTrailingBlank {
+					suffix = "\n"
+				}
+				edits = append(edits, protocol.TextEdit{
+					Range:   lineDeletionRange(semanticDoc, lines, headerLine, endLine),
+					NewText: newImport + suffix,
+				})
+			} else {
+				// Multiple items — remove this item, add inline selective after the block.
+				edits = append(edits, protocol.TextEdit{
+					Range:   lineDeletionRange(semanticDoc, lines, lineIndex, lineIndex+1),
+					NewText: "",
+				})
+				// Find end of the block to insert after it.
+				blockEnd := lineIndex + 1
+				for blockEnd < len(lines) {
+					t := trimmedLine(lines[blockEnd])
+					if strings.HasPrefix(t, "- ") || t == "" || strings.HasPrefix(t, "#") {
+						blockEnd++
+						continue
+					}
+					break
+				}
+				insertOffset := lineStartOffset(lines, blockEnd)
+				insertPos, ok := semanticDoc.positionAtOffset(insertOffset)
+				if !ok {
+					continue
+				}
+				edits = append(edits, protocol.TextEdit{
+					Range:   protocol.Range{Start: insertPos, End: insertPos},
+					NewText: newImport,
+				})
+			}
+		} else {
+			continue
+		}
+
+		actions = append(actions, protocol.CodeAction{
+			Title:       `Narrow import "` + importPath + `"`,
+			Kind:        protocol.QuickFix,
+			Diagnostics: []protocol.Diagnostic{diag},
+			IsPreferred: true,
+			Edit: &protocol.WorkspaceEdit{
+				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+					protocol.DocumentURI(doc.URI): edits,
+				},
+			},
+		})
+	}
+
+	return actions
+}
+
+func (s *Server) transitiveReImportCodeActions(doc *documents.Document, diagnostics []protocol.Diagnostic) []protocol.CodeAction {
+	if doc == nil || doc.Result == nil || doc.Result.Root == nil {
+		return nil
+	}
+
+	var warningDiags []protocol.Diagnostic
+	for _, d := range diagnostics {
+		if d.Source == "ridl" && d.Severity == protocol.DiagnosticSeverityWarning &&
+			strings.Contains(d.Message, "is defined in") {
+			warningDiags = append(warningDiags, d)
+		}
+	}
+	if len(warningDiags) == 0 {
+		return nil
+	}
+
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, doc.Result)
+	if !semanticDoc.valid() {
+		return nil
+	}
+
+	lines := splitContentLines(doc.Content)
+	var actions []protocol.CodeAction
+
+	for _, importNode := range doc.Result.Root.Imports() {
+		if importNode == nil || importNode.Path() == nil || len(importNode.Members()) == 0 {
+			continue
+		}
+
+		importPath := workspace.ResolveImportPath(doc.Path, importNode.Path().String())
+		importResult := s.parsePathForNavigation(importPath)
+		if importResult == nil || importResult.Root == nil {
+			continue
+		}
+
+		localNames := locallyDefinedNames(importResult.Root)
+
+		for _, member := range importNode.Members() {
+			if member == nil || member.String() == "" {
+				continue
+			}
+			name := member.String()
+			if _, ok := localNames[name]; ok {
+				continue
+			}
+
+			originalPath, ok := s.uniqueImportCandidatePath(doc.Path, referenceKindType, name)
+			if !ok {
+				originalPath, ok = s.uniqueImportCandidatePath(doc.Path, referenceKindError, name)
+			}
+			if !ok {
+				continue
+			}
+
+			relOriginal, ok := relativeImportPath(doc.Path, originalPath)
+			if !ok {
+				continue
+			}
+
+			memberLine := ridl.TokenLine(member) - 1
+			if memberLine < 0 || memberLine >= len(lines) {
+				continue
+			}
+
+			var edits []protocol.TextEdit
+
+			// Remove the member line from the current import.
+			edits = append(edits, protocol.TextEdit{
+				Range:   lineDeletionRange(semanticDoc, lines, memberLine, memberLine+1),
+				NewText: "",
+			})
+
+			// If removing the last member, remove the entire import entry.
+			remainingMembers := 0
+			for _, m := range importNode.Members() {
+				if m != nil && m.String() != name {
+					remainingMembers++
+				}
+			}
+
+			if remainingMembers == 0 {
+				headerLine := ridl.TokenLine(importNode.Path()) - 1
+				endLine := memberLine + 1
+				if endLine < len(lines) && trimmedLine(lines[endLine]) == "" {
+					endLine++
+				}
+				edits = []protocol.TextEdit{{
+					Range:   lineDeletionRange(semanticDoc, lines, headerLine, endLine),
+					NewText: "",
+				}}
+			}
+
+			// Find the end of the current import (after last member line).
+			lastMember := importNode.Members()[len(importNode.Members())-1]
+			insertLine := ridl.TokenLine(lastMember) // 0-based line after last member
+			insertOffset := lineStartOffset(lines, insertLine)
+			insertPos, ok := semanticDoc.positionAtOffset(insertOffset)
+			if !ok {
+				continue
+			}
+
+			edits = append(edits, protocol.TextEdit{
+				Range:   protocol.Range{Start: insertPos, End: insertPos},
+				NewText: "import " + relOriginal + "\n  - " + name + "\n",
+			})
+
+			actions = append(actions, protocol.CodeAction{
+				Title:       `Import ` + name + ` from "` + relOriginal + `" instead of "` + importNode.Path().String() + `"`,
+				Kind:        protocol.QuickFix,
+				Diagnostics: warningDiags,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+						protocol.DocumentURI(doc.URI): edits,
+					},
+				},
+			})
+		}
+	}
+
+	return actions
+}
+
+func extractQuotedString(s string) string {
+	start := strings.IndexByte(s, '"')
+	if start < 0 {
+		return ""
+	}
+	end := strings.IndexByte(s[start+1:], '"')
+	if end < 0 {
+		return ""
+	}
+	return s[start+1 : start+1+end]
 }
