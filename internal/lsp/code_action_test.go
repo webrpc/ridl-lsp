@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -917,6 +918,103 @@ service TestService
 	}
 }
 
+func TestCodeActionFixTransitiveReImport(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	orgContent := `webrpc = v1
+
+struct OrgID
+  - value: string
+`
+	orgPath := filepath.Join(dir, "organization.ridl")
+	if err := os.WriteFile(orgPath, []byte(orgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	userContent := `webrpc = v1
+
+import
+  - organization.ridl
+
+struct User
+  - id: uint64
+  - orgID: OrgID
+`
+	userPath := filepath.Join(dir, "user.ridl")
+	if err := os.WriteFile(userPath, []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import user.ridl
+  - OrgID
+  - User
+
+struct Project
+  - orgID: OrgID
+  - owner: User
+`
+	// The fix removes OrgID from user.ridl's member list and adds a new selective import from organization.ridl
+	want := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import user.ridl
+  - User
+import organization.ridl
+  - OrgID
+
+struct Project
+  - orgID: OrgID
+  - owner: User
+`
+
+	path := filepath.Join(dir, "fix-transitive.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diagnostics := client.getDiagnostics(uri)
+
+	actions, err := srv.CodeAction(ctx, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range:        fullDocumentRange(content),
+		Context: protocol.CodeActionContext{
+			Only:        []protocol.CodeActionKind{protocol.QuickFix},
+			Diagnostics: diagnostics,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	action := findCodeActionByTitle(actions, `Import OrgID from "organization.ridl" instead of "user.ridl"`)
+	if action == nil {
+		t.Fatalf("missing re-source quick fix in %#v", actions)
+	}
+
+	edits := action.Edit.Changes[protocol.DocumentURI(uri)]
+	got := applyTextEdits(t, content, edits)
+	if got != want {
+		t.Fatalf("unexpected result:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 func TestCodeActionNarrowImport(t *testing.T) {
 	srv, client, dir := setupServer(t)
 	ctx := context.Background()
@@ -1008,6 +1106,99 @@ service TestService
 	got := applyTextEdit(t, content, edits[0])
 	if got != want {
 		t.Fatalf("unexpected narrow import result:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
+func TestSelectiveImportIntegration(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	// common.ridl defines Page and EmptyResponse
+	commonContent := `webrpc = v1
+
+struct Page
+  - number: uint32
+  - size: uint32
+
+struct EmptyResponse
+`
+	commonPath := filepath.Join(dir, "common.ridl")
+	if err := os.WriteFile(commonPath, []byte(commonContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// types.ridl defines User and imports common.ridl
+	typesContent := `webrpc = v1
+
+import
+  - common.ridl
+
+struct User
+  - id: uint64
+  - name: string
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// main.ridl imports both files (full imports).
+	// common.ridl can be narrowed (only Page used, EmptyResponse unused).
+	// types.ridl can be narrowed (only User used; Page/EmptyResponse come in via common.ridl but aren't used directly).
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - common.ridl
+  - types.ridl
+
+service TestService
+  - ListUsers(page: Page) => (users: []User)
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+
+	// Should have narrowing warning for common.ridl (only Page used, not EmptyResponse)
+	hasNarrowWarning := false
+	for _, d := range diags {
+		if d.Severity == protocol.DiagnosticSeverityWarning && strings.Contains(d.Message, "can be narrowed") {
+			hasNarrowWarning = true
+		}
+	}
+	if !hasNarrowWarning {
+		t.Errorf("expected narrowing warning for common.ridl, got: %#v", diags)
+	}
+
+	// Should offer a narrow-import code action for common.ridl
+	actions, err := srv.CodeAction(ctx, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range:        fullDocumentRange(content),
+		Context: protocol.CodeActionContext{
+			Only:        []protocol.CodeActionKind{protocol.QuickFix},
+			Diagnostics: diags,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if action := findCodeActionByTitle(actions, `Narrow import "common.ridl"`); action == nil {
+		t.Errorf("expected narrow-import action for common.ridl, got actions: %#v", actions)
 	}
 }
 
