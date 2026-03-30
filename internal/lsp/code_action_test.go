@@ -819,6 +819,104 @@ struct Project
 	}
 }
 
+func TestLocallyDefinedNames(t *testing.T) {
+	srv, _, dir := setupServer(t)
+
+	content := `webrpc = v1
+
+enum Status: uint8
+  - Active
+  - Inactive
+
+struct User
+  - id: uint64
+  - name: string
+
+error 100 NotFound "not found" HTTP 404
+`
+	path := filepath.Join(dir, "defs.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := srv.parsePathForNavigation(path)
+	if result == nil || result.Root == nil {
+		t.Fatal("expected valid parse result")
+	}
+
+	names := locallyDefinedNames(result.Root)
+	expected := map[string]struct{}{
+		"Status":   {},
+		"User":     {},
+		"NotFound": {},
+	}
+
+	if len(names) != len(expected) {
+		t.Fatalf("expected %d names, got %d: %v", len(expected), len(names), names)
+	}
+	for name := range expected {
+		if _, ok := names[name]; !ok {
+			t.Errorf("missing expected name %q in %v", name, names)
+		}
+	}
+}
+
+func TestReferencedNames(t *testing.T) {
+	srv, _, dir := setupServer(t)
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+
+struct Account
+  - id: uint64
+
+struct Org
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+
+service TestService
+  - GetUser() => (user: User)
+  - GetAccount() => (account: Account)
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := srv.parsePathForNavigation(path)
+	if result == nil || result.Root == nil {
+		t.Fatal("expected valid parse result")
+	}
+
+	doc := newSemanticDocument(path, content, result)
+	names := doc.referencedNames()
+
+	if _, ok := names["User"]; !ok {
+		t.Error("expected User in referenced names")
+	}
+	if _, ok := names["Account"]; !ok {
+		t.Error("expected Account in referenced names")
+	}
+	// Org is imported but not referenced
+	if _, ok := names["Org"]; ok {
+		t.Error("Org should not be in referenced names (not used)")
+	}
+}
+
 func findCodeActionByTitle(actions []protocol.CodeAction, title string) *protocol.CodeAction {
 	for i := range actions {
 		if actions[i].Title == title {

@@ -345,6 +345,87 @@ func (d *semanticDocument) unresolvedSymbols(
 	return symbols
 }
 
+func locallyDefinedNames(root *ridl.RootNode) map[string]struct{} {
+	names := map[string]struct{}{}
+	if root == nil {
+		return names
+	}
+	for _, enumNode := range root.Enums() {
+		if enumNode != nil && enumNode.Name() != nil && enumNode.Name().String() != "" {
+			names[enumNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, structNode := range root.Structs() {
+		if structNode != nil && structNode.Name() != nil && structNode.Name().String() != "" {
+			names[structNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, errorNode := range root.Errors() {
+		if errorNode != nil && errorNode.Name() != nil && errorNode.Name().String() != "" {
+			names[errorNode.Name().String()] = struct{}{}
+		}
+	}
+	return names
+}
+
+func (d *semanticDocument) referencedNames() map[string]struct{} {
+	names := map[string]struct{}{}
+	if d == nil || !d.valid() {
+		return names
+	}
+
+	addTypeRefs := func(token *ridl.TokenNode) {
+		if token == nil {
+			return
+		}
+		for _, name := range unresolvedTypeNames(token.String()) {
+			if !isBuiltInRIDLType(name) {
+				names[name] = struct{}{}
+			}
+		}
+	}
+
+	addErrorRef := func(token *ridl.TokenNode) {
+		if token != nil && token.String() != "" {
+			names[token.String()] = struct{}{}
+		}
+	}
+
+	for _, enumNode := range d.result.Root.Enums() {
+		addTypeRefs(enumNode.TypeName())
+		for _, value := range enumNode.Values() {
+			addTypeRefs(value.Right())
+		}
+	}
+
+	for _, structNode := range d.result.Root.Structs() {
+		for _, field := range structNode.Fields() {
+			addTypeRefs(field.Right())
+		}
+	}
+
+	for _, serviceNode := range d.result.Root.Services() {
+		for _, methodNode := range serviceNode.Methods() {
+			for _, input := range methodNode.Inputs() {
+				addTypeRefs(argumentTypeToken(input))
+			}
+			for _, output := range methodNode.Outputs() {
+				addTypeRefs(argumentTypeToken(output))
+			}
+			for _, errorToken := range methodNode.Errors() {
+				addErrorRef(errorToken)
+			}
+		}
+	}
+
+	// Remove locally defined names — we only want external references.
+	for name := range locallyDefinedNames(d.result.Root) {
+		delete(names, name)
+	}
+
+	return names
+}
+
 func unresolvedTypeNames(expr string) []string {
 	if expr == "" {
 		return nil
