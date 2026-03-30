@@ -29,6 +29,7 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 		if doc, ok := s.docs.Get(string(params.TextDocument.URI)); ok {
 			actions = append(actions, s.unresolvedImportCodeActions(doc, params.Context.Diagnostics)...)
 			actions = append(actions, s.missingImportCodeActions(doc, params.Context.Diagnostics)...)
+			actions = append(actions, s.narrowImportCodeActions(doc, params.Context.Diagnostics)...)
 		}
 	}
 
@@ -817,4 +818,100 @@ func positionKey(pos protocol.Position) string {
 
 func intString[T ~uint32 | ~int](value T) string {
 	return strconv.Itoa(int(value))
+}
+
+func (s *Server) narrowImportCodeActions(doc *documents.Document, diagnostics []protocol.Diagnostic) []protocol.CodeAction {
+	if doc == nil || doc.Result == nil || doc.Result.Root == nil {
+		return nil
+	}
+
+	var actions []protocol.CodeAction
+	for _, diag := range diagnostics {
+		if diag.Source != "ridl" || diag.Severity != protocol.DiagnosticSeverityWarning {
+			continue
+		}
+
+		isUnused := strings.Contains(diag.Message, "is unused")
+		isNarrowable := strings.Contains(diag.Message, "can be narrowed")
+		if !isUnused && !isNarrowable {
+			continue
+		}
+
+		lineIndex := int(diag.Range.Start.Line)
+		semanticDoc := newSemanticDocument(doc.Path, doc.Content, doc.Result)
+
+		if isUnused {
+			edit, ok := unresolvedImportEdit(semanticDoc, lineIndex)
+			if !ok {
+				continue
+			}
+			// Extract import path from message: Import "X" is unused
+			importPath := extractQuotedString(diag.Message)
+			actions = append(actions, protocol.CodeAction{
+				Title:       `Remove unused import "` + importPath + `"`,
+				Kind:        protocol.QuickFix,
+				Diagnostics: []protocol.Diagnostic{diag},
+				IsPreferred: true,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+						protocol.DocumentURI(doc.URI): {edit},
+					},
+				},
+			})
+			continue
+		}
+
+		// Narrowable: extract used names from message after "can be narrowed to: "
+		importPath := extractQuotedString(diag.Message)
+		idx := strings.Index(diag.Message, "can be narrowed to: ")
+		if idx < 0 {
+			continue
+		}
+		nameList := diag.Message[idx+len("can be narrowed to: "):]
+		names := strings.Split(nameList, ", ")
+
+		lines := splitContentLines(doc.Content)
+		if lineIndex < 0 || lineIndex >= len(lines) {
+			continue
+		}
+
+		var memberLines string
+		for _, name := range names {
+			memberLines += "    - " + name + "\n"
+		}
+
+		actions = append(actions, protocol.CodeAction{
+			Title:       `Narrow import "` + importPath + `"`,
+			Kind:        protocol.QuickFix,
+			Diagnostics: []protocol.Diagnostic{diag},
+			IsPreferred: true,
+			Edit: &protocol.WorkspaceEdit{
+				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+					protocol.DocumentURI(doc.URI): {
+						{
+							Range: protocol.Range{
+								Start: protocol.Position{Line: uint32(lineIndex), Character: uint32(len(strings.TrimRight(lines[lineIndex], "\n")))},
+								End:   protocol.Position{Line: uint32(lineIndex), Character: uint32(len(strings.TrimRight(lines[lineIndex], "\n")))},
+							},
+							NewText: "\n" + memberLines[:len(memberLines)-1], // trim trailing newline; the existing line already has one
+						},
+					},
+				},
+			},
+		})
+	}
+
+	return actions
+}
+
+func extractQuotedString(s string) string {
+	start := strings.IndexByte(s, '"')
+	if start < 0 {
+		return ""
+	}
+	end := strings.IndexByte(s[start+1:], '"')
+	if end < 0 {
+		return ""
+	}
+	return s[start+1 : start+1+end]
 }

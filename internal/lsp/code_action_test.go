@@ -917,6 +917,100 @@ service TestService
 	}
 }
 
+func TestCodeActionNarrowImport(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+
+struct Account
+  - id: uint64
+
+struct Org
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+
+service TestService
+  - GetUser() => (user: User)
+`
+	want := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+    - User
+
+service TestService
+  - GetUser() => (user: User)
+`
+
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diagnostics := client.getDiagnostics(uri)
+	if len(diagnostics) == 0 {
+		t.Fatal("expected narrowing diagnostics")
+	}
+
+	actions, err := srv.CodeAction(ctx, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range:        fullDocumentRange(content),
+		Context: protocol.CodeActionContext{
+			Only:        []protocol.CodeActionKind{protocol.QuickFix},
+			Diagnostics: diagnostics,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	action := findCodeActionByTitle(actions, `Narrow import "types.ridl"`)
+	if action == nil {
+		t.Fatalf("missing narrow import action in %#v", actions)
+	}
+	if action.Edit == nil {
+		t.Fatal("expected narrow import edit")
+	}
+
+	edits := action.Edit.Changes[protocol.DocumentURI(uri)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %#v", edits)
+	}
+
+	got := applyTextEdit(t, content, edits[0])
+	if got != want {
+		t.Fatalf("unexpected narrow import result:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 func findCodeActionByTitle(actions []protocol.CodeAction, title string) *protocol.CodeAction {
 	for i := range actions {
 		if actions[i].Title == title {
