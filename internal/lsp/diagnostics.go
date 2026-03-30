@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -10,7 +11,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/webrpc/ridl-lsp/internal/documents"
+	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/ridl-lsp/internal/workspace"
+	"github.com/webrpc/webrpc/schema"
 )
 
 var (
@@ -50,7 +53,7 @@ func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
 
 	if len(result.Errors) == 0 {
 		doc.Result = result
-		return []protocol.Diagnostic{}
+		return s.importDiagnostics(doc)
 	}
 
 	doc.Result = nil
@@ -143,4 +146,92 @@ func severityError() protocol.DiagnosticSeverity {
 
 func PathToURI(p string) protocol.DocumentURI {
 	return workspace.PathToURI(p)
+}
+
+func severityWarning() protocol.DiagnosticSeverity {
+	return protocol.DiagnosticSeverityWarning
+}
+
+func exportedSchemaNames(s *schema.WebRPCSchema) map[string]struct{} {
+	names := map[string]struct{}{}
+	if s == nil {
+		return names
+	}
+	for _, t := range s.Types {
+		if t != nil && t.Name != "" {
+			names[t.Name] = struct{}{}
+		}
+	}
+	for _, e := range s.Errors {
+		if e != nil && e.Name != "" {
+			names[e.Name] = struct{}{}
+		}
+	}
+	return names
+}
+
+func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnostic {
+	if doc == nil || doc.Result == nil || doc.Result.Root == nil {
+		return nil
+	}
+
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, doc.Result)
+	referenced := semanticDoc.referencedNames()
+
+	var diagnostics []protocol.Diagnostic
+	for _, importNode := range doc.Result.Root.Imports() {
+		if importNode == nil || importNode.Path() == nil {
+			continue
+		}
+		// Only check full imports (no member list).
+		if len(importNode.Members()) > 0 {
+			continue
+		}
+
+		importPath := importNode.Path().String()
+		resolvedPath := workspace.ResolveImportPath(doc.Path, importPath)
+
+		importResult, err := s.parser.Parse(s.workspace.Root(), resolvedPath, s.overlayContents())
+		if err != nil || importResult == nil || importResult.Schema == nil {
+			continue
+		}
+
+		exported := exportedSchemaNames(importResult.Schema)
+		if len(exported) == 0 {
+			continue
+		}
+
+		var used []string
+		for name := range exported {
+			if _, ok := referenced[name]; ok {
+				used = append(used, name)
+			}
+		}
+		sort.Strings(used)
+
+		line := ridl.TokenLine(importNode.Path())
+
+		if len(used) == 0 {
+			diagnostics = append(diagnostics, protocol.Diagnostic{
+				Range:    lineRange(line),
+				Severity: severityWarning(),
+				Message:  `Import "` + importPath + `" is unused`,
+				Source:   "ridl",
+			})
+			continue
+		}
+
+		if len(used) == len(exported) {
+			continue
+		}
+
+		diagnostics = append(diagnostics, protocol.Diagnostic{
+			Range:    lineRange(line),
+			Severity: severityWarning(),
+			Message:  `Import "` + importPath + `" can be narrowed to: ` + strings.Join(used, ", "),
+			Source:   "ridl",
+		})
+	}
+
+	return diagnostics
 }

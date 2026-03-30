@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -536,6 +537,156 @@ struct User
 	diags = client.getDiagnostics(mainURI)
 	if len(diags) == 0 {
 		t.Fatal("expected diagnostics after closing overlay-only imported file")
+	}
+}
+
+func TestNarrowImportDiagnostic(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+
+struct Account
+  - id: uint64
+
+struct Org
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+
+service TestService
+  - GetUser() => (user: User)
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "can be narrowed to: User") {
+		t.Fatalf("expected narrowing diagnostic, got %q", diags[0].Message)
+	}
+	if diags[0].Severity != protocol.DiagnosticSeverityWarning {
+		t.Fatalf("expected warning severity, got %v", diags[0].Severity)
+	}
+}
+
+func TestNoNarrowDiagnosticWhenAllTypesUsed(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+
+service TestService
+  - GetUser() => (user: User)
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diagnostics when all types used, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestUnusedImportDiagnostic(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - types.ridl
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	if len(diags) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %d: %v", len(diags), diags)
+	}
+	if !strings.Contains(diags[0].Message, "is unused") {
+		t.Fatalf("expected unused import diagnostic, got %q", diags[0].Message)
+	}
+	if diags[0].Severity != protocol.DiagnosticSeverityWarning {
+		t.Fatalf("expected warning severity, got %v", diags[0].Severity)
 	}
 }
 
