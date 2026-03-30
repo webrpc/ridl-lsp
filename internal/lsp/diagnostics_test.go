@@ -690,6 +690,125 @@ import
 	}
 }
 
+func TestTransitiveReImportDiagnostic(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	orgContent := `webrpc = v1
+
+struct OrgID
+  - value: string
+`
+	orgPath := filepath.Join(dir, "organization.ridl")
+	if err := os.WriteFile(orgPath, []byte(orgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	userContent := `webrpc = v1
+
+import
+  - organization.ridl
+
+struct User
+  - id: uint64
+  - orgID: OrgID
+`
+	userPath := filepath.Join(dir, "user.ridl")
+	if err := os.WriteFile(userPath, []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import user.ridl
+  - OrgID
+
+struct Project
+  - orgID: OrgID
+`
+	path := filepath.Join(dir, "transitive.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	var reImportDiag *protocol.Diagnostic
+	for i := range diags {
+		if diags[i].Severity == protocol.DiagnosticSeverityWarning &&
+			strings.Contains(diags[i].Message, "defined in") {
+			reImportDiag = &diags[i]
+			break
+		}
+	}
+
+	if reImportDiag == nil {
+		t.Fatalf("expected transitive re-import warning, got: %#v", diags)
+	}
+
+	if !strings.Contains(reImportDiag.Message, "organization.ridl") {
+		t.Errorf("expected diagnostic to mention organization.ridl, got: %s", reImportDiag.Message)
+	}
+}
+
+func TestNoTransitiveDiagnosticForCorrectSelectiveImport(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	typesContent := `webrpc = v1
+
+struct User
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import types.ridl
+  - User
+
+service TestService
+  - GetUser() => (user: User)
+`
+	path := filepath.Join(dir, "correct-selective.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	for _, d := range diags {
+		if d.Severity == protocol.DiagnosticSeverityWarning {
+			t.Fatalf("unexpected warning: %s", d.Message)
+		}
+	}
+}
+
 func TestWatchedImportedFileChangesRefreshDiagnostics(t *testing.T) {
 	srv, client, dir := setupServer(t)
 	ctx := context.Background()

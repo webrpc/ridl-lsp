@@ -233,5 +233,52 @@ func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnosti
 		})
 	}
 
+	// Check selective imports for transitive re-imports.
+	for _, importNode := range doc.Result.Root.Imports() {
+		if importNode == nil || importNode.Path() == nil || len(importNode.Members()) == 0 {
+			continue
+		}
+
+		importPath := workspace.ResolveImportPath(doc.Path, importNode.Path().String())
+		importResult := s.parsePathForNavigation(importPath)
+		if importResult == nil || importResult.Root == nil {
+			continue
+		}
+
+		localNames := locallyDefinedNames(importResult.Root)
+
+		for _, member := range importNode.Members() {
+			if member == nil || member.String() == "" {
+				continue
+			}
+			name := member.String()
+
+			if _, ok := localNames[name]; ok {
+				continue
+			}
+
+			originalPath, ok := s.uniqueImportCandidatePath(doc.Path, referenceKindType, name)
+			if !ok {
+				originalPath, ok = s.uniqueImportCandidatePath(doc.Path, referenceKindError, name)
+			}
+			if !ok {
+				continue
+			}
+
+			relOriginal, ok := relativeImportPath(doc.Path, originalPath)
+			if !ok {
+				continue
+			}
+
+			memberLine := ridl.TokenLine(member) - 1
+			diagnostics = append(diagnostics, protocol.Diagnostic{
+				Range:    lineRange(memberLine + 1),
+				Severity: severityWarning(),
+				Message:  name + ` is defined in "` + relOriginal + `", not "` + importNode.Path().String() + `"`,
+				Source:   "ridl",
+			})
+		}
+	}
+
 	return diagnostics
 }

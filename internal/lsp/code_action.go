@@ -30,6 +30,7 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 			actions = append(actions, s.unresolvedImportCodeActions(doc, params.Context.Diagnostics)...)
 			actions = append(actions, s.missingImportCodeActions(doc, params.Context.Diagnostics)...)
 			actions = append(actions, s.narrowImportCodeActions(doc, params.Context.Diagnostics)...)
+			actions = append(actions, s.transitiveReImportCodeActions(doc, params.Context.Diagnostics)...)
 		}
 	}
 
@@ -899,6 +900,128 @@ func (s *Server) narrowImportCodeActions(doc *documents.Document, diagnostics []
 				},
 			},
 		})
+	}
+
+	return actions
+}
+
+func (s *Server) transitiveReImportCodeActions(doc *documents.Document, diagnostics []protocol.Diagnostic) []protocol.CodeAction {
+	if doc == nil || doc.Result == nil || doc.Result.Root == nil {
+		return nil
+	}
+
+	var warningDiags []protocol.Diagnostic
+	for _, d := range diagnostics {
+		if d.Source == "ridl" && d.Severity == protocol.DiagnosticSeverityWarning &&
+			strings.Contains(d.Message, "is defined in") {
+			warningDiags = append(warningDiags, d)
+		}
+	}
+	if len(warningDiags) == 0 {
+		return nil
+	}
+
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, doc.Result)
+	if !semanticDoc.valid() {
+		return nil
+	}
+
+	lines := splitContentLines(doc.Content)
+	var actions []protocol.CodeAction
+
+	for _, importNode := range doc.Result.Root.Imports() {
+		if importNode == nil || importNode.Path() == nil || len(importNode.Members()) == 0 {
+			continue
+		}
+
+		importPath := workspace.ResolveImportPath(doc.Path, importNode.Path().String())
+		importResult := s.parsePathForNavigation(importPath)
+		if importResult == nil || importResult.Root == nil {
+			continue
+		}
+
+		localNames := locallyDefinedNames(importResult.Root)
+
+		for _, member := range importNode.Members() {
+			if member == nil || member.String() == "" {
+				continue
+			}
+			name := member.String()
+			if _, ok := localNames[name]; ok {
+				continue
+			}
+
+			originalPath, ok := s.uniqueImportCandidatePath(doc.Path, referenceKindType, name)
+			if !ok {
+				originalPath, ok = s.uniqueImportCandidatePath(doc.Path, referenceKindError, name)
+			}
+			if !ok {
+				continue
+			}
+
+			relOriginal, ok := relativeImportPath(doc.Path, originalPath)
+			if !ok {
+				continue
+			}
+
+			memberLine := ridl.TokenLine(member) - 1
+			if memberLine < 0 || memberLine >= len(lines) {
+				continue
+			}
+
+			var edits []protocol.TextEdit
+
+			// Remove the member line from the current import.
+			edits = append(edits, protocol.TextEdit{
+				Range:   lineDeletionRange(semanticDoc, lines, memberLine, memberLine+1),
+				NewText: "",
+			})
+
+			// If removing the last member, remove the entire import entry.
+			remainingMembers := 0
+			for _, m := range importNode.Members() {
+				if m != nil && m.String() != name {
+					remainingMembers++
+				}
+			}
+
+			if remainingMembers == 0 {
+				headerLine := ridl.TokenLine(importNode.Path()) - 1
+				endLine := memberLine + 1
+				if endLine < len(lines) && trimmedLine(lines[endLine]) == "" {
+					endLine++
+				}
+				edits = []protocol.TextEdit{{
+					Range:   lineDeletionRange(semanticDoc, lines, headerLine, endLine),
+					NewText: "",
+				}}
+			}
+
+			// Find the end of the current import (after last member line).
+			lastMember := importNode.Members()[len(importNode.Members())-1]
+			insertLine := ridl.TokenLine(lastMember) // 0-based line after last member
+			insertOffset := lineStartOffset(lines, insertLine)
+			insertPos, ok := semanticDoc.positionAtOffset(insertOffset)
+			if !ok {
+				continue
+			}
+
+			edits = append(edits, protocol.TextEdit{
+				Range:   protocol.Range{Start: insertPos, End: insertPos},
+				NewText: "import " + relOriginal + "\n  - " + name + "\n",
+			})
+
+			actions = append(actions, protocol.CodeAction{
+				Title:       `Import ` + name + ` from "` + relOriginal + `" instead of "` + importNode.Path().String() + `"`,
+				Kind:        protocol.QuickFix,
+				Diagnostics: warningDiags,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+						protocol.DocumentURI(doc.URI): edits,
+					},
+				},
+			})
+		}
 	}
 
 	return actions
