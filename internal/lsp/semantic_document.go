@@ -110,6 +110,19 @@ func (d *semanticDocument) hoverAt(pos protocol.Position) *hoverMatch {
 		}
 	}
 
+	for _, aliasNode := range root.TypeAliases() {
+		if match := d.hoverForToken(aliasNode.Name(), pos, func() string {
+			return formatTypeHover(d.typeByName(aliasNode.Name().String()))
+		}); match != nil {
+			return match
+		}
+		if match := d.hoverForToken(aliasNode.TypeName(), pos, func() string {
+			return d.formatTypeTokenHover(aliasNode.TypeName(), pos)
+		}); match != nil {
+			return match
+		}
+	}
+
 	for _, errorNode := range root.Errors() {
 		if match := d.hoverForToken(errorNode.Name(), pos, func() string {
 			return formatErrorHover(d.errorByName(errorNode.Name().String()))
@@ -214,6 +227,15 @@ func (d *semanticDocument) definitionAt(
 			if d.tokenContainsPosition(field.Right(), pos) {
 				return resolveType(d.path, d.result, d.identifierAtTokenPosition(field.Right(), pos))
 			}
+		}
+	}
+
+	for _, aliasNode := range root.TypeAliases() {
+		if d.tokenContainsPosition(aliasNode.Name(), pos) {
+			return definitionForToken(d.path, aliasNode.Name())
+		}
+		if d.tokenContainsPosition(aliasNode.TypeName(), pos) {
+			return resolveType(d.path, d.result, d.identifierAtTokenPosition(aliasNode.TypeName(), pos))
 		}
 	}
 

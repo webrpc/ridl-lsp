@@ -88,6 +88,22 @@ func (d *semanticDocument) referenceTargetAt(
 		}
 	}
 
+	for _, aliasNode := range d.result.Root.TypeAliases() {
+		if d.tokenContainsPosition(aliasNode.Name(), pos) {
+			return &referenceTarget{
+				kind:       referenceKindType,
+				name:       aliasNode.Name().String(),
+				definition: definitionForToken(d.path, aliasNode.Name()),
+			}
+		}
+		if d.tokenContainsPosition(aliasNode.TypeName(), pos) {
+			name := d.identifierAtTokenPosition(aliasNode.TypeName(), pos)
+			if definition := resolveType(d.path, d.result, name); definition != nil {
+				return &referenceTarget{kind: referenceKindType, name: name, definition: definition}
+			}
+		}
+	}
+
 	for _, errorNode := range d.result.Root.Errors() {
 		if d.tokenContainsPosition(errorNode.Name(), pos) {
 			return &referenceTarget{
@@ -190,6 +206,13 @@ func (d *semanticDocument) referenceLocations(
 			for _, field := range structNode.Fields() {
 				appendResolvedTypeRefs(field.Right())
 			}
+		}
+	}
+
+	for _, aliasNode := range d.result.Root.TypeAliases() {
+		appendDefinition(aliasNode.Name(), referenceKindType)
+		if target.kind == referenceKindType {
+			appendResolvedTypeRefs(aliasNode.TypeName())
 		}
 	}
 

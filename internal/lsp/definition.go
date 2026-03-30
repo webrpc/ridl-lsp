@@ -136,6 +136,11 @@ func findTypeDefinitionToken(root *ridl.RootNode, name string) *ridl.TokenNode {
 			return structNode.Name()
 		}
 	}
+	for _, aliasNode := range root.TypeAliases() {
+		if strings.EqualFold(aliasNode.Name().String(), name) {
+			return aliasNode.Name()
+		}
+	}
 	return nil
 }
 
