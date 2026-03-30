@@ -320,6 +320,10 @@ func (d *semanticDocument) unresolvedSymbols(
 		}
 	}
 
+	for _, aliasNode := range d.result.Root.TypeAliases() {
+		appendTypeRefs(aliasNode.TypeName())
+	}
+
 	for _, serviceNode := range d.result.Root.Services() {
 		for _, methodNode := range serviceNode.Methods() {
 			for _, input := range methodNode.Inputs() {
@@ -367,6 +371,11 @@ func locallyDefinedNames(root *ridl.RootNode) map[string]struct{} {
 			names[errorNode.Name().String()] = struct{}{}
 		}
 	}
+	for _, aliasNode := range root.TypeAliases() {
+		if aliasNode != nil && aliasNode.Name() != nil && aliasNode.Name().String() != "" {
+			names[aliasNode.Name().String()] = struct{}{}
+		}
+	}
 	return names
 }
 
@@ -404,6 +413,10 @@ func (d *semanticDocument) referencedNames() map[string]struct{} {
 		for _, field := range structNode.Fields() {
 			addTypeRefs(field.Right())
 		}
+	}
+
+	for _, aliasNode := range d.result.Root.TypeAliases() {
+		addTypeRefs(aliasNode.TypeName())
 	}
 
 	for _, serviceNode := range d.result.Root.Services() {
