@@ -15,6 +15,7 @@ import (
 	"github.com/webrpc/ridl-lsp/internal/documents"
 	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/ridl-lsp/internal/workspace"
+	"github.com/webrpc/webrpc/schema"
 )
 
 func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
@@ -378,7 +379,7 @@ func unresolvedTypeNames(expr string) []string {
 }
 
 func (s *Server) uniqueImportCandidatePath(docPath string, kind referenceKind, name string) (string, bool) {
-	matches := make([]string, 0, 2)
+	var definers, reExporters []string
 	seen := map[string]struct{}{}
 
 	for _, path := range s.referenceCandidatePaths() {
@@ -391,6 +392,12 @@ func (s *Server) uniqueImportCandidatePath(docPath string, kind referenceKind, n
 			continue
 		}
 
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+
+		// Check if name is locally defined in this file's AST (not via imports).
 		var token *ridl.TokenNode
 		switch kind {
 		case referenceKindType:
@@ -398,24 +405,46 @@ func (s *Server) uniqueImportCandidatePath(docPath string, kind referenceKind, n
 		case referenceKindError:
 			token = findErrorDefinitionToken(result.Root, name)
 		}
-		if token == nil {
+
+		if token != nil {
+			definers = append(definers, path)
 			continue
 		}
 
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		matches = append(matches, path)
-		if len(matches) > 1 {
-			return "", false
+		// Check if the name is available through this file's resolved schema
+		// (i.e., it re-exports the name via imports).
+		if result.Schema != nil && schemaHasName(result.Schema, kind, name) {
+			reExporters = append(reExporters, path)
 		}
 	}
 
-	if len(matches) != 1 {
+	// Prefer the unique definer.
+	if len(definers) == 1 {
+		return definers[0], true
+	}
+	if len(definers) > 1 {
 		return "", false
 	}
-	return matches[0], true
+
+	// Fall back to re-exporters only if no definer found.
+	if len(reExporters) == 1 {
+		return reExporters[0], true
+	}
+	return "", false
+}
+
+func schemaHasName(s *schema.WebRPCSchema, kind referenceKind, name string) bool {
+	switch kind {
+	case referenceKindType:
+		return s.GetTypeByName(name) != nil
+	case referenceKindError:
+		for _, e := range s.Errors {
+			if strings.EqualFold(e.Name, name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func docHasImportedPath(doc *semanticDocument, targetPath string) bool {

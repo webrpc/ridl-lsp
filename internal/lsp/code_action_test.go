@@ -718,6 +718,107 @@ service TestService
 	}
 }
 
+func TestCodeActionPrefersDefinerOverReExporter(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	// organization.ridl defines OrgID
+	orgContent := `webrpc = v1
+
+struct OrgID
+  - value: string
+`
+	orgPath := filepath.Join(dir, "organization.ridl")
+	if err := os.WriteFile(orgPath, []byte(orgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// user.ridl imports organization.ridl (re-exports OrgID)
+	userContent := `webrpc = v1
+
+import
+  - organization.ridl
+
+struct User
+  - id: uint64
+  - orgID: OrgID
+`
+	userPath := filepath.Join(dir, "user.ridl")
+	if err := os.WriteFile(userPath, []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// project.ridl uses OrgID without importing anything
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+struct Project
+  - id: uint64
+  - orgID: OrgID
+`
+	want := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - organization.ridl
+
+struct Project
+  - id: uint64
+  - orgID: OrgID
+`
+
+	path := filepath.Join(dir, "project.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diagnostics := client.getDiagnostics(uri)
+	if len(diagnostics) == 0 {
+		t.Fatal("expected diagnostics for unresolved type")
+	}
+
+	actions, err := srv.CodeAction(ctx, &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+		Range:        fullDocumentRange(content),
+		Context: protocol.CodeActionContext{
+			Only:        []protocol.CodeActionKind{protocol.QuickFix},
+			Diagnostics: diagnostics,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should suggest organization.ridl (definer), NOT user.ridl (re-exporter)
+	action := findCodeActionByTitle(actions, `Import "organization.ridl" for "OrgID"`)
+	if action == nil {
+		t.Fatalf("missing auto-import for OrgID from organization.ridl in %#v", actions)
+	}
+
+	if wrongAction := findCodeActionByTitle(actions, `Import "user.ridl" for "OrgID"`); wrongAction != nil {
+		t.Fatalf("should not suggest re-exporter user.ridl")
+	}
+
+	edits := action.Edit.Changes[protocol.DocumentURI(uri)]
+	got := applyTextEdit(t, content, edits[0])
+	if got != want {
+		t.Fatalf("unexpected result:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 func findCodeActionByTitle(actions []protocol.CodeAction, title string) *protocol.CodeAction {
 	for i := range actions {
 		if actions[i].Title == title {
