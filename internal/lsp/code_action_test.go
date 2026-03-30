@@ -1051,9 +1051,8 @@ service TestService
 name = testapp
 version = v0.1.0
 
-import
-  - types.ridl
-    - User
+import types.ridl
+  - User
 
 service TestService
   - GetUser() => (user: User)
@@ -1099,11 +1098,7 @@ service TestService
 	}
 
 	edits := action.Edit.Changes[protocol.DocumentURI(uri)]
-	if len(edits) != 1 {
-		t.Fatalf("expected 1 edit, got %#v", edits)
-	}
-
-	got := applyTextEdit(t, content, edits[0])
+	got := applyTextEdits(t, content, edits)
 	if got != want {
 		t.Fatalf("unexpected narrow import result:\nwant:\n%s\ngot:\n%s", want, got)
 	}

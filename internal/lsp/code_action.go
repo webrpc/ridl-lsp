@@ -846,7 +846,6 @@ func (s *Server) narrowImportCodeActions(doc *documents.Document, diagnostics []
 			if !ok {
 				continue
 			}
-			// Extract import path from message: Import "X" is unused
 			importPath := extractQuotedString(diag.Message)
 			actions = append(actions, protocol.CodeAction{
 				Title:       `Remove unused import "` + importPath + `"`,
@@ -862,7 +861,6 @@ func (s *Server) narrowImportCodeActions(doc *documents.Document, diagnostics []
 			continue
 		}
 
-		// Narrowable: extract used names from message after "can be narrowed to: "
 		importPath := extractQuotedString(diag.Message)
 		idx := strings.Index(diag.Message, "can be narrowed to: ")
 		if idx < 0 {
@@ -876,9 +874,73 @@ func (s *Server) narrowImportCodeActions(doc *documents.Document, diagnostics []
 			continue
 		}
 
+		// Build the inline selective import replacement.
 		var memberLines string
 		for _, name := range names {
-			memberLines += "    - " + name + "\n"
+			memberLines += "  - " + name + "\n"
+		}
+		newImport := "import " + importPath + "\n" + memberLines
+
+		trimmed := trimmedLine(lines[lineIndex])
+
+		var edits []protocol.TextEdit
+		if strings.HasPrefix(trimmed, "import ") {
+			// Already inline form: replace the import line with inline selective.
+			edits = append(edits, protocol.TextEdit{
+				Range:   lineDeletionRange(semanticDoc, lines, lineIndex, lineIndex+1),
+				NewText: newImport,
+			})
+		} else if strings.HasPrefix(trimmed, "- ") {
+			// Block form item (  - path.ridl): figure out how to replace it.
+			headerLine, itemCount, ok := importBlockInfo(lines, lineIndex)
+			if !ok {
+				continue
+			}
+
+			if itemCount == 1 {
+				// Only item in block — replace entire block with inline selective.
+				endLine := lineIndex + 1
+				// Preserve trailing blank line separation.
+				hasTrailingBlank := endLine < len(lines) && trimmedLine(lines[endLine]) == ""
+				if hasTrailingBlank {
+					endLine++
+				}
+				suffix := ""
+				if hasTrailingBlank {
+					suffix = "\n"
+				}
+				edits = append(edits, protocol.TextEdit{
+					Range:   lineDeletionRange(semanticDoc, lines, headerLine, endLine),
+					NewText: newImport + suffix,
+				})
+			} else {
+				// Multiple items — remove this item, add inline selective after the block.
+				edits = append(edits, protocol.TextEdit{
+					Range:   lineDeletionRange(semanticDoc, lines, lineIndex, lineIndex+1),
+					NewText: "",
+				})
+				// Find end of the block to insert after it.
+				blockEnd := lineIndex + 1
+				for blockEnd < len(lines) {
+					t := trimmedLine(lines[blockEnd])
+					if strings.HasPrefix(t, "- ") || t == "" || strings.HasPrefix(t, "#") {
+						blockEnd++
+						continue
+					}
+					break
+				}
+				insertOffset := lineStartOffset(lines, blockEnd)
+				insertPos, ok := semanticDoc.positionAtOffset(insertOffset)
+				if !ok {
+					continue
+				}
+				edits = append(edits, protocol.TextEdit{
+					Range:   protocol.Range{Start: insertPos, End: insertPos},
+					NewText: newImport,
+				})
+			}
+		} else {
+			continue
 		}
 
 		actions = append(actions, protocol.CodeAction{
@@ -888,15 +950,7 @@ func (s *Server) narrowImportCodeActions(doc *documents.Document, diagnostics []
 			IsPreferred: true,
 			Edit: &protocol.WorkspaceEdit{
 				Changes: map[protocol.DocumentURI][]protocol.TextEdit{
-					protocol.DocumentURI(doc.URI): {
-						{
-							Range: protocol.Range{
-								Start: protocol.Position{Line: uint32(lineIndex), Character: uint32(len(strings.TrimRight(lines[lineIndex], "\n")))},
-								End:   protocol.Position{Line: uint32(lineIndex), Character: uint32(len(strings.TrimRight(lines[lineIndex], "\n")))},
-							},
-							NewText: "\n" + memberLines[:len(memberLines)-1], // trim trailing newline; the existing line already has one
-						},
-					},
+					protocol.DocumentURI(doc.URI): edits,
 				},
 			},
 		})
