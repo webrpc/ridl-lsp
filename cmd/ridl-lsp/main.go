@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -9,10 +10,16 @@ import (
 	"go.lsp.dev/protocol"
 	"go.uber.org/zap"
 
+	ridllsp "github.com/webrpc/ridl-lsp"
 	"github.com/webrpc/ridl-lsp/internal/lsp"
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("ridl-lsp %s\n", ridllsp.VERSION)
+		os.Exit(0)
+	}
+
 	log.Println("ridl-lsp starting on stdio")
 
 	ctx := context.Background()

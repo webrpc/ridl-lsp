@@ -1,0 +1,69 @@
+# See documentation at https://goreleaser.com/customization/build.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+project_name: ridl-lsp
+
+builds:
+  - id: ridl-lsp
+    main: ./cmd/ridl-lsp
+    binary: ridl-lsp
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/webrpc/ridl-lsp.VERSION=v{{.Version}}
+
+archives:
+  - id: ridl-lsp
+    builds:
+      - ridl-lsp
+    name_template: "{{ .Binary }}.{{ .Os }}-{{ .Arch }}"
+    format: binary
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  replace_existing_artifacts: true
+  footer: |
+    ## Homebrew
+    ```
+    brew tap webrpc/tap
+    brew install ridl-lsp
+    ```
+
+    ## Build from source
+    ```
+    go install -ldflags="-s -w -X github.com/webrpc/ridl-lsp.VERSION=v{{.Version}}" github.com/webrpc/ridl-lsp/cmd/ridl-lsp@v{{.Version}}
+    ```
+
+    ## Download binaries
+    macOS: [amd64](https://github.com/webrpc/ridl-lsp/releases/download/v{{.Version}}/ridl-lsp.darwin-amd64), [arm64](https://github.com/webrpc/ridl-lsp/releases/download/v{{.Version}}/ridl-lsp.darwin-arm64) (Apple Silicon)
+    Linux: [amd64](https://github.com/webrpc/ridl-lsp/releases/download/v{{.Version}}/ridl-lsp.linux-amd64), [arm64](https://github.com/webrpc/ridl-lsp/releases/download/v{{.Version}}/ridl-lsp.linux-arm64)
+    Windows: [amd64](https://github.com/webrpc/ridl-lsp/releases/download/v{{.Version}}/ridl-lsp.windows-amd64.exe), [arm64](https://github.com/webrpc/ridl-lsp/releases/download/v{{.Version}}/ridl-lsp.windows-arm64.exe)
+
+changelog:
+  use: github-native
+  sort: asc
+
+brews:
+  - name: ridl-lsp
+    ids:
+      - ridl-lsp
+    repository:
+      owner: webrpc
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    homepage: "https://github.com/webrpc/ridl-lsp"
+    description: "Language server for RIDL schema files"
+    license: "MIT"
