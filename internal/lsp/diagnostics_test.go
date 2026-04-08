@@ -597,6 +597,89 @@ service TestService
 	}
 }
 
+func TestNarrowImportExcludesTransitiveTypes(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	// common.ridl defines Page.
+	commonContent := `webrpc = v1
+
+struct Page
+  - number: uint32
+`
+	commonPath := filepath.Join(dir, "common.ridl")
+	if err := os.WriteFile(commonPath, []byte(commonContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// types.ridl defines User and Account, and imports common.ridl.
+	// Through the resolved schema, types.ridl "re-exports" Page.
+	typesContent := `webrpc = v1
+
+import
+  - common.ridl
+
+struct User
+  - id: uint64
+
+struct Account
+  - id: uint64
+`
+	typesPath := filepath.Join(dir, "types.ridl")
+	if err := os.WriteFile(typesPath, []byte(typesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// main.ridl uses User (from types.ridl) and Page (from common.ridl).
+	// The narrowing diagnostic for types.ridl should suggest only "User",
+	// not "Page, User" — Page is not locally defined in types.ridl.
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - common.ridl
+  - types.ridl
+
+service TestService
+  - ListUsers(page: Page) => (users: []User)
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+
+	// types.ridl locally defines User and Account. Only User is used,
+	// so we expect a narrowing diagnostic mentioning only "User".
+	var typesNarrow string
+	for _, d := range diags {
+		if d.Severity == protocol.DiagnosticSeverityWarning && strings.Contains(d.Message, "types.ridl") && strings.Contains(d.Message, "can be narrowed") {
+			typesNarrow = d.Message
+		}
+	}
+	if typesNarrow == "" {
+		t.Fatalf("expected narrowing diagnostic for types.ridl, got: %v", diags)
+	}
+	if strings.Contains(typesNarrow, "Page") {
+		t.Errorf("narrowing diagnostic for types.ridl should not include transitive type Page: %q", typesNarrow)
+	}
+	if !strings.Contains(typesNarrow, "User") {
+		t.Errorf("narrowing diagnostic for types.ridl should include locally defined User: %q", typesNarrow)
+	}
+}
+
 func TestNoNarrowDiagnosticWhenAllTypesUsed(t *testing.T) {
 	srv, client, dir := setupServer(t)
 	ctx := context.Background()
