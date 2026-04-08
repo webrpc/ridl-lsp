@@ -13,7 +13,6 @@ import (
 	"github.com/webrpc/ridl-lsp/internal/documents"
 	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/ridl-lsp/internal/workspace"
-	"github.com/webrpc/webrpc/schema"
 )
 
 var (
@@ -152,24 +151,6 @@ func severityWarning() protocol.DiagnosticSeverity {
 	return protocol.DiagnosticSeverityWarning
 }
 
-func exportedSchemaNames(s *schema.WebRPCSchema) map[string]struct{} {
-	names := map[string]struct{}{}
-	if s == nil {
-		return names
-	}
-	for _, t := range s.Types {
-		if t != nil && t.Name != "" {
-			names[t.Name] = struct{}{}
-		}
-	}
-	for _, e := range s.Errors {
-		if e != nil && e.Name != "" {
-			names[e.Name] = struct{}{}
-		}
-	}
-	return names
-}
-
 func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnostic {
 	if doc == nil || doc.Result == nil || doc.Result.Root == nil {
 		return nil
@@ -192,11 +173,11 @@ func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnosti
 		resolvedPath := workspace.ResolveImportPath(doc.Path, importPath)
 
 		importResult, err := s.parser.Parse(s.workspace.Root(), resolvedPath, s.overlayContents())
-		if err != nil || importResult == nil || importResult.Schema == nil {
+		if err != nil || importResult == nil || importResult.Root == nil {
 			continue
 		}
 
-		exported := exportedSchemaNames(importResult.Schema)
+		exported := locallyDefinedNames(importResult.Root)
 		if len(exported) == 0 {
 			continue
 		}
