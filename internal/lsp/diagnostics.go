@@ -177,13 +177,22 @@ func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnosti
 			continue
 		}
 
-		exported := locallyDefinedNames(importResult.Root)
-		if len(exported) == 0 {
+		contrib := importContributionsOf(importResult.Root)
+
+		// Services and top-level errors always contribute to the aggregated
+		// webrpc output — the import is used regardless of whether the
+		// importer references any of its types by name. Narrowing is also
+		// unsafe here: a member list would drop the service/error from codegen.
+		if len(contrib.services) > 0 || len(contrib.errors) > 0 {
+			continue
+		}
+
+		if len(contrib.types) == 0 {
 			continue
 		}
 
 		var used []string
-		for name := range exported {
+		for name := range contrib.types {
 			if _, ok := referenced[name]; ok {
 				used = append(used, name)
 			}
@@ -202,7 +211,7 @@ func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnosti
 			continue
 		}
 
-		if len(used) == len(exported) {
+		if len(used) == len(contrib.types) {
 			continue
 		}
 

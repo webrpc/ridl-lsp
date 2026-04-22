@@ -10,12 +10,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/webrpc/webrpc/schema"
 	"go.lsp.dev/protocol"
 
 	"github.com/webrpc/ridl-lsp/internal/documents"
 	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 	"github.com/webrpc/ridl-lsp/internal/workspace"
-	"github.com/webrpc/webrpc/schema"
 )
 
 func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
@@ -349,6 +349,54 @@ func (d *semanticDocument) unresolvedSymbols(
 	})
 
 	return symbols
+}
+
+// importContributions captures what an imported file adds to the aggregated
+// webrpc schema. Services and errors are "always-used contributors": webrpc
+// flattens them into the output regardless of whether the importer references
+// them by name. Only types (struct/enum/typealias) need per-name reference
+// checking to decide if an import is dead weight.
+type importContributions struct {
+	types    map[string]struct{}
+	errors   map[string]struct{}
+	services map[string]struct{}
+}
+
+func importContributionsOf(root *ridl.RootNode) importContributions {
+	c := importContributions{
+		types:    map[string]struct{}{},
+		errors:   map[string]struct{}{},
+		services: map[string]struct{}{},
+	}
+	if root == nil {
+		return c
+	}
+	for _, enumNode := range root.Enums() {
+		if enumNode != nil && enumNode.Name() != nil && enumNode.Name().String() != "" {
+			c.types[enumNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, structNode := range root.Structs() {
+		if structNode != nil && structNode.Name() != nil && structNode.Name().String() != "" {
+			c.types[structNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, aliasNode := range root.TypeAliases() {
+		if aliasNode != nil && aliasNode.Name() != nil && aliasNode.Name().String() != "" {
+			c.types[aliasNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, errorNode := range root.Errors() {
+		if errorNode != nil && errorNode.Name() != nil && errorNode.Name().String() != "" {
+			c.errors[errorNode.Name().String()] = struct{}{}
+		}
+	}
+	for _, serviceNode := range root.Services() {
+		if serviceNode != nil && serviceNode.Name() != nil && serviceNode.Name().String() != "" {
+			c.services[serviceNode.Name().String()] = struct{}{}
+		}
+	}
+	return c
 }
 
 func locallyDefinedNames(root *ridl.RootNode) map[string]struct{} {
