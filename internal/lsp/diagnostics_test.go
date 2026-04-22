@@ -773,6 +773,162 @@ import
 	}
 }
 
+func TestImportWithServiceNotFlaggedAsUnused(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	// A service-bearing file — structs are request/response DTOs not referenced
+	// by the importer, but the service itself contributes to codegen output.
+	serviceContent := `webrpc = v1
+
+struct GetUserRequest
+  - id: uint64
+
+struct GetUserResponse
+  - name: string
+
+service Users
+  - GetUser(req: GetUserRequest) => (resp: GetUserResponse)
+`
+	servicePath := filepath.Join(dir, "users.ridl")
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Aggregator pattern: main.ridl only imports; it doesn't reference
+	// any type from users.ridl directly.
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - users.ridl
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	for _, d := range diags {
+		if d.Severity == protocol.DiagnosticSeverityWarning {
+			t.Fatalf("unexpected warning on aggregator importing service file: %q", d.Message)
+		}
+	}
+}
+
+func TestImportWithErrorsOnlyNotFlaggedAsUnused(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	errorsContent := `webrpc = v1
+
+error 100 NotFound "not found" HTTP 404
+error 101 Forbidden "forbidden" HTTP 403
+`
+	errorsPath := filepath.Join(dir, "errors.ridl")
+	if err := os.WriteFile(errorsPath, []byte(errorsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Aggregator imports the errors file but doesn't reference NotFound/Forbidden
+	// here. Errors are aggregated into codegen output regardless.
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - errors.ridl
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	for _, d := range diags {
+		if d.Severity == protocol.DiagnosticSeverityWarning {
+			t.Fatalf("unexpected warning on import of errors-only file: %q", d.Message)
+		}
+	}
+}
+
+func TestImportWithServiceNoNarrowingSuggestion(t *testing.T) {
+	srv, client, dir := setupServer(t)
+	ctx := context.Background()
+
+	// Service file also exposes two auxiliary types, only one of which the
+	// importer references. Narrowing the import would drop the service from
+	// codegen — suggestion must not fire.
+	serviceContent := `webrpc = v1
+
+struct AuditEntry
+  - when: uint64
+
+struct AuditSource
+  - kind: string
+
+service Users
+  - GetUser() => (id: uint64)
+`
+	servicePath := filepath.Join(dir, "users.ridl")
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `webrpc = v1
+
+name = testapp
+version = v0.1.0
+
+import
+  - users.ridl
+
+struct Audit
+  - entry: AuditEntry
+`
+	path := filepath.Join(dir, "main.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	diags := client.getDiagnostics(uri)
+	for _, d := range diags {
+		if d.Severity == protocol.DiagnosticSeverityWarning && strings.Contains(d.Message, "can be narrowed") {
+			t.Fatalf("unexpected narrowing suggestion on service-bearing file: %q", d.Message)
+		}
+	}
+}
+
 func TestTransitiveReImportDiagnostic(t *testing.T) {
 	srv, client, dir := setupServer(t)
 	ctx := context.Background()
