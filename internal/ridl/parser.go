@@ -39,23 +39,32 @@ type upstreamNode struct {
 
 type upstreamTokenType uint8
 
+// upstreamToken mirrors the memory layout of the upstream (unexported)
+// schema/ridl.token so that line and col can be read through unsafe.Pointer.
+// The leading fields are blank padding: they are never read here, but their
+// order, type, and size must match upstream exactly or line/col would resolve
+// to the wrong offsets. TestUpstreamLayoutCanary guards against drift.
 type upstreamToken struct {
-	tt  upstreamTokenType
-	val string
+	_ upstreamTokenType // tt
+	_ string            // val
 
-	pos  int
+	_    int // pos
 	line int
 	col  int
 }
 
+// upstreamParser mirrors the memory layout of the upstream (unexported)
+// schema/ridl.parser. Only root is read; the leading fields are blank padding
+// kept in sync with the upstream field order so root resolves to the correct
+// offset. TestUpstreamLayoutCanary guards against drift.
 type upstreamParser struct {
-	file   string
-	tokens []upstreamToken
-	length int
-	pos    int
+	_ string          // file
+	_ []upstreamToken // tokens
+	_ int             // length
+	_ int             // pos
 
-	words    chan interface{}
-	comments map[int]string
+	_ chan interface{} // words
+	_ map[int]string   // comments
 
 	root RootNode
 }
