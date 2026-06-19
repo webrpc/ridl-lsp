@@ -11,6 +11,7 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	ridllsp "github.com/webrpc/ridl-lsp"
 	"github.com/webrpc/ridl-lsp/internal/lsp"
@@ -30,7 +31,7 @@ func main() {
 	defer stop()
 	stream := jsonrpc2.NewStream(stdrwc{})
 
-	logger, err := zap.NewProduction()
+	logger, err := newLogger(os.Getenv("RIDL_LSP_LOG_LEVEL"))
 	if err != nil {
 		log.Fatalf("create logger: %v", err)
 	}
@@ -66,6 +67,22 @@ func main() {
 		log.Println("ridl-lsp: signal received, shutting down")
 		_ = conn.Close()
 	}
+}
+
+// newLogger builds the production logger at the level named by level (debug,
+// info, warn, error). An empty string keeps the default, and an unparseable value
+// is reported and ignored rather than failing startup over a typo'd env var.
+func newLogger(level string) (*zap.Logger, error) {
+	cfg := zap.NewProductionConfig()
+	if level != "" {
+		var l zapcore.Level
+		if err := l.UnmarshalText([]byte(level)); err != nil {
+			log.Printf("ridl-lsp: ignoring invalid RIDL_LSP_LOG_LEVEL %q: %v", level, err)
+		} else {
+			cfg.Level = zap.NewAtomicLevelAt(l)
+		}
+	}
+	return cfg.Build()
 }
 
 type stdrwc struct{}
