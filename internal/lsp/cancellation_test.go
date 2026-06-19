@@ -47,3 +47,24 @@ func TestParseDocumentSkipsCanceledContext(t *testing.T) {
 		t.Fatal("cancelled parse must not clear the cached result")
 	}
 }
+
+// TestParsePathHonorsCanceledContext: the ctx-aware parse used by the diagnostics
+// path (e.g. transitive re-import checks) must stop on a cancelled request rather
+// than parsing imports off a dead request.
+func TestParsePathHonorsCanceledContext(t *testing.T) {
+	srv, _, dir := setupServer(t)
+
+	other := filepath.Join(dir, "other.ridl")
+	if err := os.WriteFile(other, []byte(validRIDL), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// other.ridl is not open, so there is no cached result to short-circuit on:
+	// parsePath must parse, and that parse must bail on the cancelled context.
+	if got := srv.parsePath(ctx, other); got != nil {
+		t.Fatalf("expected nil from parsePath on cancelled ctx, got %v", got)
+	}
+}

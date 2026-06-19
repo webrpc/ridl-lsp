@@ -48,16 +48,20 @@ func definitionForToken(path string, token *ridl.TokenNode) *definitionMatch {
 	return &definitionMatch{path: path, token: token}
 }
 
+// parsePathForNavigation deliberately uses context.Background(): interactive
+// navigation is a fast single-file parse, and threading the request ctx through
+// the whole resolution-callback layer would be high-churn for negligible benefit.
+// The cancellable callers (diagnostics) use parsePath directly.
 func (s *Server) parsePathForNavigation(path string) *ridl.ParseResult {
+	return s.parsePath(context.Background(), path)
+}
+
+func (s *Server) parsePath(ctx context.Context, path string) *ridl.ParseResult {
 	if doc, ok := s.docs.FindByPath(path); ok && doc.Result != nil && doc.Result.Root != nil {
 		return doc.Result
 	}
 
-	// Single-file navigation parse: fast and not on a cancellation-critical path,
-	// so it deliberately does not thread the request ctx (which would ripple
-	// through the whole resolution-callback layer for negligible benefit). The
-	// import-chasing diagnostics path and the workspace walk are the cancellable ones.
-	result, err := s.parser.Parse(context.Background(), s.workspace.Root(), path, s.overlayContents())
+	result, err := s.parser.Parse(ctx, s.workspace.Root(), path, s.overlayContents())
 	if err != nil {
 		return nil
 	}

@@ -40,12 +40,14 @@ func (s *Server) parseDocument(ctx context.Context, doc *documents.Document) []p
 	overlays := s.overlayContents()
 
 	result, err := s.parser.Parse(ctx, s.workspace.Root(), doc.Path, overlays)
+	// Bail before touching anything on cancellation. Import recursion swallows
+	// ctx errors as skipped imports, so Parse can return err == nil with an
+	// incomplete result after a cancel — caching that would poison the document's
+	// state, and surfacing ctx.Err() as a diagnostic would flash a bogus error.
+	if ctx.Err() != nil {
+		return nil
+	}
 	if err != nil {
-		// Cancellation is not a parse failure: don't surface ctx.Err() as a
-		// diagnostic or clobber the cached result with the prior content's parse.
-		if ctx.Err() != nil {
-			return nil
-		}
 		s.docs.SetResult(doc.URI, doc.Version, nil)
 		return []protocol.Diagnostic{
 			{
@@ -240,7 +242,7 @@ func (s *Server) importDiagnostics(ctx context.Context, doc *documents.Document,
 		}
 
 		importPath := workspace.ResolveImportPath(doc.Path, importNode.Path().String())
-		importResult := s.parsePathForNavigation(importPath)
+		importResult := s.parsePath(ctx, importPath)
 		if importResult == nil || importResult.Root == nil {
 			continue
 		}
