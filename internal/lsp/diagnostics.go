@@ -259,9 +259,9 @@ func (s *Server) importDiagnostics(ctx context.Context, doc *documents.Document,
 				continue
 			}
 
-			originalPath, ok := s.uniqueImportCandidatePath(doc.Path, referenceKindType, name)
+			originalPath, ok := s.uniqueImportCandidatePath(ctx, doc.Path, referenceKindType, name)
 			if !ok {
-				originalPath, ok = s.uniqueImportCandidatePath(doc.Path, referenceKindError, name)
+				originalPath, ok = s.uniqueImportCandidatePath(ctx, doc.Path, referenceKindError, name)
 			}
 			if !ok {
 				continue
