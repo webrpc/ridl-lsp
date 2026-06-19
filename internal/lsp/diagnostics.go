@@ -22,7 +22,9 @@ var (
 
 func (s *Server) parseAndPublishDiagnostics(ctx context.Context, doc *documents.Document) {
 	diagnostics := s.parseDocument(ctx, doc)
-	if s.client == nil {
+	// A cancelled/superseded request must not overwrite the client's diagnostics
+	// with a half-computed (or empty) set.
+	if ctx.Err() != nil || s.client == nil {
 		return
 	}
 
@@ -39,6 +41,11 @@ func (s *Server) parseDocument(ctx context.Context, doc *documents.Document) []p
 
 	result, err := s.parser.Parse(ctx, s.workspace.Root(), doc.Path, overlays)
 	if err != nil {
+		// Cancellation is not a parse failure: don't surface ctx.Err() as a
+		// diagnostic or clobber the cached result with the prior content's parse.
+		if ctx.Err() != nil {
+			return nil
+		}
 		s.docs.SetResult(doc.URI, doc.Version, nil)
 		return []protocol.Diagnostic{
 			{
