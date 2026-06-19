@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"sync/atomic"
 
 	"go.lsp.dev/protocol"
 	"go.uber.org/zap"
@@ -17,6 +18,8 @@ type Server struct {
 	parser    *ridlparser.Parser
 	client    protocol.Client
 	logger    *zap.Logger
+
+	shutdown atomic.Bool
 }
 
 func NewServer(logger *zap.Logger) *Server {
@@ -104,11 +107,18 @@ func (s *Server) Initialized(ctx context.Context, params *protocol.InitializedPa
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.shutdown.Store(true)
 	return nil
 }
 
 func (s *Server) Exit(ctx context.Context) error {
 	return nil
+}
+
+// ShutdownReceived reports whether the client sent shutdown before exit, which
+// the LSP spec uses to decide the process exit code (0 if it did, else 1).
+func (s *Server) ShutdownReceived() bool {
+	return s.shutdown.Load()
 }
 
 func (s *Server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error {

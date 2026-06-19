@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -22,7 +24,10 @@ func main() {
 
 	log.Println("ridl-lsp starting on stdio")
 
-	ctx := context.Background()
+	// Cancel on SIGINT/SIGTERM so a supervised/containerized server (the Docker
+	// ENTRYPOINT) shuts the connection down cleanly instead of being killed.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	stream := jsonrpc2.NewStream(stdrwc{})
 
 	logger, err := zap.NewProduction()
@@ -48,7 +53,19 @@ func main() {
 	)
 	conn.Go(ctx, protocol.Handlers(handler))
 
-	<-conn.Done()
+	select {
+	case <-conn.Done():
+		// Client closed the stream. Per the LSP spec, exit 0 only if shutdown was
+		// received first; a drop without shutdown is abnormal and exits non-zero.
+		if !server.ShutdownReceived() {
+			_ = logger.Sync() //nolint:errcheck // best-effort flush before non-zero exit
+			os.Exit(1)
+		}
+	case <-ctx.Done():
+		// SIGINT/SIGTERM: close the connection and exit cleanly.
+		log.Println("ridl-lsp: signal received, shutting down")
+		_ = conn.Close()
+	}
 }
 
 type stdrwc struct{}
