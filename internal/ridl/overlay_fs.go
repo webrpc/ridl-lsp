@@ -57,10 +57,13 @@ type memFileInfo struct {
 	size int64
 }
 
-func (fi *memFileInfo) Name() string       { return fi.name }
-func (fi *memFileInfo) Size() int64        { return fi.size }
-func (fi *memFileInfo) Mode() fs.FileMode  { return 0444 }
-func (fi *memFileInfo) ModTime() time.Time { return time.Now() }
+func (fi *memFileInfo) Name() string      { return fi.name }
+func (fi *memFileInfo) Size() int64       { return fi.size }
+func (fi *memFileInfo) Mode() fs.FileMode { return 0444 }
+
+// In-memory overlays have no real mtime; a zero time keeps the FileInfo
+// deterministic (the parser only reads content, never the timestamp).
+func (fi *memFileInfo) ModTime() time.Time { return time.Time{} }
 func (fi *memFileInfo) IsDir() bool        { return false }
 func (fi *memFileInfo) Sys() any           { return nil }
 

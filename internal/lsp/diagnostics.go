@@ -79,8 +79,9 @@ func (s *Server) parseDocument(ctx context.Context, doc *documents.Document) []p
 }
 
 func (s *Server) overlayContents() map[string]string {
-	overlays := make(map[string]string, len(s.docs.All()))
-	for _, doc := range s.docs.All() {
+	docs := s.docs.All()
+	overlays := make(map[string]string, len(docs))
+	for _, doc := range docs {
 		overlays[doc.Path] = doc.Content
 	}
 	return overlays

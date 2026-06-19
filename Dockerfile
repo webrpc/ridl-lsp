@@ -2,7 +2,7 @@
 # Builder
 # -----------------------------------------------------------------
 FROM golang:1.25-alpine3.22 as builder
-ARG VERSION
+ARG VERSION=dev
 
 RUN apk add --update git
 
