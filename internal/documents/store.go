@@ -47,6 +47,26 @@ func (s *Store) Delete(uri string) {
 	delete(s.docs, uri)
 }
 
+// SetResult attaches a parse result to the stored document via copy-on-write,
+// leaving any snapshot a caller already holds unmutated. The update is dropped if
+// the document is gone or its version has moved on (a newer change superseded the
+// content this result was parsed from), so a stale parse is never cached. It
+// reports whether the result was applied.
+func (s *Store) SetResult(uri string, version int32, result *ridl.ParseResult) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	doc, ok := s.docs[uri]
+	if !ok || doc.Version != version {
+		return false
+	}
+
+	updated := *doc
+	updated.Result = result
+	s.docs[uri] = &updated
+	return true
+}
+
 func (s *Store) All() []*Document {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

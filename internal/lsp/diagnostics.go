@@ -39,7 +39,7 @@ func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
 
 	result, err := s.parser.Parse(s.workspace.Root(), doc.Path, overlays)
 	if err != nil {
-		doc.Result = nil
+		s.docs.SetResult(doc.URI, doc.Version, nil)
 		return []protocol.Diagnostic{
 			{
 				Range:    lineRange(1),
@@ -51,11 +51,11 @@ func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
 	}
 
 	if len(result.Errors) == 0 {
-		doc.Result = result
-		return s.importDiagnostics(doc)
+		s.docs.SetResult(doc.URI, doc.Version, result)
+		return s.importDiagnostics(doc, result)
 	}
 
-	doc.Result = nil
+	s.docs.SetResult(doc.URI, doc.Version, nil)
 
 	diagnostics := make([]protocol.Diagnostic, 0, len(result.Errors))
 	for _, e := range result.Errors {
@@ -151,16 +151,16 @@ func severityWarning() protocol.DiagnosticSeverity {
 	return protocol.DiagnosticSeverityWarning
 }
 
-func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnostic {
-	if doc == nil || doc.Result == nil || doc.Result.Root == nil {
+func (s *Server) importDiagnostics(doc *documents.Document, result *ridl.ParseResult) []protocol.Diagnostic {
+	if doc == nil || result == nil || result.Root == nil {
 		return nil
 	}
 
-	semanticDoc := newSemanticDocument(doc.Path, doc.Content, doc.Result)
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, result)
 	referenced := semanticDoc.referencedNames()
 
 	var diagnostics []protocol.Diagnostic
-	for _, importNode := range doc.Result.Root.Imports() {
+	for _, importNode := range result.Root.Imports() {
 		if importNode == nil || importNode.Path() == nil {
 			continue
 		}
@@ -224,7 +224,7 @@ func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnosti
 	}
 
 	// Check selective imports for transitive re-imports.
-	for _, importNode := range doc.Result.Root.Imports() {
+	for _, importNode := range result.Root.Imports() {
 		if importNode == nil || importNode.Path() == nil || len(importNode.Members()) == 0 {
 			continue
 		}
