@@ -53,7 +53,11 @@ func (s *Server) parsePathForNavigation(path string) *ridl.ParseResult {
 		return doc.Result
 	}
 
-	result, err := s.parser.Parse(s.workspace.Root(), path, s.overlayContents())
+	// Single-file navigation parse: fast and not on a cancellation-critical path,
+	// so it deliberately does not thread the request ctx (which would ripple
+	// through the whole resolution-callback layer for negligible benefit). The
+	// import-chasing diagnostics path and the workspace walk are the cancellable ones.
+	result, err := s.parser.Parse(context.Background(), s.workspace.Root(), path, s.overlayContents())
 	if err != nil {
 		return nil
 	}

@@ -1,6 +1,7 @@
 package ridl
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
@@ -64,7 +65,7 @@ func TestUpstreamLayoutCanary(t *testing.T) {
 
 	writeTestFile(t, path, content)
 
-	result, err := NewParser().Parse(dir, path, nil)
+	result, err := NewParser().Parse(context.Background(), dir, path, nil)
 	if err != nil {
 		t.Fatalf("Parse returned error: %v", err)
 	}

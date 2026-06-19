@@ -1,6 +1,7 @@
 package ridl
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ service SharedService
 	writeTestFile(t, mainPath, mainContent)
 	writeTestFile(t, sharedPath, sharedContent)
 
-	result, err := NewParser().Parse(dir, mainPath, nil)
+	result, err := NewParser().Parse(context.Background(), dir, mainPath, nil)
 	if err != nil {
 		t.Fatalf("Parse returned error: %v", err)
 	}
@@ -62,7 +63,7 @@ service MainService
 
 	writeTestFile(t, path, content)
 
-	result, err := NewParser().Parse(dir, path, nil)
+	result, err := NewParser().Parse(context.Background(), dir, path, nil)
 	if err != nil {
 		t.Fatalf("Parse returned error: %v", err)
 	}
@@ -71,6 +72,19 @@ service MainService
 	}
 	if !strings.Contains(result.Errors[0].Error(), "version is required when services are defined") {
 		t.Fatalf("expected missing version error, got %v", result.Errors[0])
+	}
+}
+
+func TestParseHonorsCanceledContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.ridl")
+	writeTestFile(t, path, "webrpc = v1\n\nname = x\nversion = v1.0.0\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := NewParser().Parse(ctx, dir, path, nil); err == nil {
+		t.Fatal("expected Parse to return the context error when the context is already cancelled")
 	}
 }
 

@@ -1,6 +1,7 @@
 package ridl
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -170,11 +171,17 @@ func NewParser() *Parser {
 
 // Parse parses the RIDL file at path using workspace as the preferred fs root.
 // overlays maps document paths to in-memory content (open editor buffers).
-func (p *Parser) Parse(workspace, path string, overlays map[string]string) (*ParseResult, error) {
-	return p.parse(workspace, path, overlays, map[string]struct{}{})
+func (p *Parser) Parse(ctx context.Context, workspace, path string, overlays map[string]string) (*ParseResult, error) {
+	return p.parse(ctx, workspace, path, overlays, map[string]struct{}{})
 }
 
-func (p *Parser) parse(workspace, path string, overlays map[string]string, visited map[string]struct{}) (*ParseResult, error) {
+func (p *Parser) parse(ctx context.Context, workspace, path string, overlays map[string]string, visited map[string]struct{}) (*ParseResult, error) {
+	// Bail before each (possibly recursive, import-chasing) parse so a superseded
+	// or client-cancelled request stops promptly instead of walking the import graph.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	fsys, root, relPath, err := parserFS(workspace, path, overlays)
 	if err != nil {
 		return nil, err
@@ -196,7 +203,7 @@ func (p *Parser) parse(workspace, path string, overlays map[string]string, visit
 	if err := runUpstreamParser(astParser); err != nil {
 		rootNode := astParser.root
 		result.Root = &rootNode
-		result.Schema = p.buildPartialSchema(workspace, path, result.Root, overlays, visited)
+		result.Schema = p.buildPartialSchema(ctx, workspace, path, result.Root, overlays, visited)
 		result.Errors = []error{err}
 		return result, nil
 	}
@@ -204,7 +211,7 @@ func (p *Parser) parse(workspace, path string, overlays map[string]string, visit
 	rootNode := astParser.root
 	result.Root = &rootNode
 	imported := len(visited) > 0
-	result.Schema = p.buildPartialSchema(workspace, path, result.Root, overlays, visited)
+	result.Schema = p.buildPartialSchema(ctx, workspace, path, result.Root, overlays, visited)
 
 	schemaDoc, err := ridl.NewParser(fsys, root, relPath).Parse()
 	if err != nil {
@@ -231,7 +238,7 @@ func isVersionOptionalSchemaError(err error, imported bool) bool {
 	return imported || strings.Contains(err.Error(), "stack trace:")
 }
 
-func (p *Parser) buildPartialSchema(workspace, path string, root *RootNode, overlays map[string]string, visited map[string]struct{}) *schema.WebRPCSchema {
+func (p *Parser) buildPartialSchema(ctx context.Context, workspace, path string, root *RootNode, overlays map[string]string, visited map[string]struct{}) *schema.WebRPCSchema {
 	doc := &schema.WebRPCSchema{
 		Types:    []*schema.Type{},
 		Errors:   []*schema.Error{},
@@ -273,7 +280,7 @@ func (p *Parser) buildPartialSchema(workspace, path string, root *RootNode, over
 			continue
 		}
 
-		importResult, err := p.parse(workspace, importPath, overlays, cloneVisited(visited))
+		importResult, err := p.parse(ctx, workspace, importPath, overlays, cloneVisited(visited))
 		if err != nil || importResult == nil || importResult.Schema == nil {
 			continue
 		}

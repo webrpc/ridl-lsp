@@ -21,7 +21,7 @@ var (
 )
 
 func (s *Server) parseAndPublishDiagnostics(ctx context.Context, doc *documents.Document) {
-	diagnostics := s.parseDocument(doc)
+	diagnostics := s.parseDocument(ctx, doc)
 	if s.client == nil {
 		return
 	}
@@ -34,10 +34,10 @@ func (s *Server) parseAndPublishDiagnostics(ctx context.Context, doc *documents.
 	}
 }
 
-func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
+func (s *Server) parseDocument(ctx context.Context, doc *documents.Document) []protocol.Diagnostic {
 	overlays := s.overlayContents()
 
-	result, err := s.parser.Parse(s.workspace.Root(), doc.Path, overlays)
+	result, err := s.parser.Parse(ctx, s.workspace.Root(), doc.Path, overlays)
 	if err != nil {
 		s.docs.SetResult(doc.URI, doc.Version, nil)
 		return []protocol.Diagnostic{
@@ -52,7 +52,7 @@ func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
 
 	if len(result.Errors) == 0 {
 		s.docs.SetResult(doc.URI, doc.Version, result)
-		return s.importDiagnostics(doc, result)
+		return s.importDiagnostics(ctx, doc, result)
 	}
 
 	// Cache the partial result even with parse errors: the parser still produces
@@ -154,7 +154,7 @@ func severityWarning() protocol.DiagnosticSeverity {
 	return protocol.DiagnosticSeverityWarning
 }
 
-func (s *Server) importDiagnostics(doc *documents.Document, result *ridl.ParseResult) []protocol.Diagnostic {
+func (s *Server) importDiagnostics(ctx context.Context, doc *documents.Document, result *ridl.ParseResult) []protocol.Diagnostic {
 	if doc == nil || result == nil || result.Root == nil {
 		return nil
 	}
@@ -175,7 +175,7 @@ func (s *Server) importDiagnostics(doc *documents.Document, result *ridl.ParseRe
 		importPath := importNode.Path().String()
 		resolvedPath := workspace.ResolveImportPath(doc.Path, importPath)
 
-		importResult, err := s.parser.Parse(s.workspace.Root(), resolvedPath, s.overlayContents())
+		importResult, err := s.parser.Parse(ctx, s.workspace.Root(), resolvedPath, s.overlayContents())
 		if err != nil || importResult == nil || importResult.Root == nil {
 			continue
 		}
