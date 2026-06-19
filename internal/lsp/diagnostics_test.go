@@ -268,7 +268,7 @@ func TestInvalidToValidClearsDiagnostics(t *testing.T) {
 	}
 }
 
-func TestValidToInvalidClearsCachedParseResult(t *testing.T) {
+func TestValidToInvalidRetainsPartialParseResult(t *testing.T) {
 	srv, client, dir := setupServer(t)
 	ctx := context.Background()
 
@@ -316,8 +316,11 @@ func TestValidToInvalidClearsCachedParseResult(t *testing.T) {
 	if !ok {
 		t.Fatal("expected changed document to remain tracked")
 	}
-	if doc.Result != nil {
-		t.Fatal("expected cached parse result to be cleared after parse failure")
+	// The parser produces a best-effort AST even on failure; retaining it lets
+	// navigation reuse the partial result mid-edit instead of re-parsing the same
+	// invalid buffer on every request (audit I3).
+	if doc.Result == nil || doc.Result.Root == nil {
+		t.Fatal("expected a partial parse result to be retained after parse failure")
 	}
 }
 

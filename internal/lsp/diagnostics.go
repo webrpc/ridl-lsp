@@ -55,7 +55,10 @@ func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
 		return s.importDiagnostics(doc, result)
 	}
 
-	s.docs.SetResult(doc.URI, doc.Version, nil)
+	// Cache the partial result even with parse errors: the parser still produces
+	// a best-effort AST (Root is populated), and reusing it lets navigation work
+	// — and avoids a re-parse per request — while the user is mid-edit.
+	s.docs.SetResult(doc.URI, doc.Version, result)
 
 	diagnostics := make([]protocol.Diagnostic, 0, len(result.Errors))
 	for _, e := range result.Errors {
