@@ -20,6 +20,8 @@ type Server struct {
 	client    protocol.Client
 	logger    *zap.Logger
 
+	parseCache *parseCache
+
 	shutdown atomic.Bool
 	// exitProcess is os.Exit in production; injectable so the exit-code contract
 	// can be tested without terminating the test binary.
@@ -33,6 +35,7 @@ func NewServer(logger *zap.Logger) *Server {
 		parser:      ridlparser.NewParser(),
 		logger:      logger,
 		exitProcess: os.Exit,
+		parseCache:  newParseCache(),
 	}
 }
 
