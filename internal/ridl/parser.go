@@ -226,16 +226,24 @@ func (p *Parser) parse(ctx context.Context, workspace, path string, overlays map
 	return result, nil
 }
 
+// These substrings couple us to upstream webrpc error wording — there is no typed
+// error to match on. TestVersionRequiredErrorFormat pins them so an upstream bump
+// that changes the wording fails CI instead of silently breaking import handling.
+const (
+	errVersionRequiredText = "schema error: version is required when services are defined"
+	errStackTraceText      = "stack trace:"
+)
+
 func isVersionOptionalSchemaError(err error, imported bool) bool {
 	if err == nil {
 		return false
 	}
 
-	if !strings.Contains(err.Error(), "schema error: version is required when services are defined") {
+	if !strings.Contains(err.Error(), errVersionRequiredText) {
 		return false
 	}
 
-	return imported || strings.Contains(err.Error(), "stack trace:")
+	return imported || strings.Contains(err.Error(), errStackTraceText)
 }
 
 func (p *Parser) buildPartialSchema(ctx context.Context, workspace, path string, root *RootNode, overlays map[string]string, visited map[string]struct{}) *schema.WebRPCSchema {

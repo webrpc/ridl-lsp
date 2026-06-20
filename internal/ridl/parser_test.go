@@ -75,6 +75,23 @@ service MainService
 	}
 }
 
+func TestVersionRequiredErrorFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "svc.ridl")
+	writeTestFile(t, path, "webrpc = v1\n\nname = Main\n\nservice S\n  - Ping() => (ok: bool)\n")
+
+	result, err := NewParser().Parse(context.Background(), dir, path, nil)
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if len(result.Errors) == 0 {
+		t.Fatal("expected a version-required error for a top-level service without a version")
+	}
+	if !strings.Contains(result.Errors[0].Error(), errVersionRequiredText) {
+		t.Fatalf("upstream version-required wording drifted: %q no longer contains %q (isVersionOptionalSchemaError would break)", result.Errors[0].Error(), errVersionRequiredText)
+	}
+}
+
 func TestParseHonorsCanceledContext(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.ridl")

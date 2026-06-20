@@ -2,6 +2,8 @@ package lsp
 
 import (
 	"context"
+	"os"
+	"sync/atomic"
 
 	"go.lsp.dev/protocol"
 	"go.uber.org/zap"
@@ -17,14 +19,20 @@ type Server struct {
 	parser    *ridlparser.Parser
 	client    protocol.Client
 	logger    *zap.Logger
+
+	shutdown atomic.Bool
+	// exitProcess is os.Exit in production; injectable so the exit-code contract
+	// can be tested without terminating the test binary.
+	exitProcess func(int)
 }
 
 func NewServer(logger *zap.Logger) *Server {
 	return &Server{
-		docs:      documents.NewStore(),
-		workspace: workspace.NewManager(),
-		parser:    ridlparser.NewParser(),
-		logger:    logger,
+		docs:        documents.NewStore(),
+		workspace:   workspace.NewManager(),
+		parser:      ridlparser.NewParser(),
+		logger:      logger,
+		exitProcess: os.Exit,
 	}
 }
 
@@ -104,11 +112,23 @@ func (s *Server) Initialized(ctx context.Context, params *protocol.InitializedPa
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.shutdown.Store(true)
 	return nil
 }
 
 func (s *Server) Exit(ctx context.Context) error {
+	// LSP: exit 0 only if shutdown was received first, otherwise 1.
+	_ = s.logger.Sync() //nolint:errcheck // best-effort flush before exit
+	s.exitProcess(exitCode(s.shutdown.Load()))
 	return nil
+}
+
+// exitCode maps the shutdown-before-exit state to the LSP-mandated process code.
+func exitCode(shutdownReceived bool) int {
+	if shutdownReceived {
+		return 0
+	}
+	return 1
 }
 
 func (s *Server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error {
