@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"go.lsp.dev/protocol"
 
@@ -22,50 +23,102 @@ func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) 
 	if !ok {
 		return []protocol.CodeLens{}, nil
 	}
-
-	semanticDoc := newSemanticDocument(doc.Path, doc.Content, s.parsePathForNavigation(doc.Path))
+	// Check cancellation before the (potentially expensive) initial parse so a
+	// cancelled request never surfaces as a misleading empty success.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	parse := s.newRequestParse(ctx)
+	rootResult := parse(doc.Path)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, rootResult)
 	if !semanticDoc.valid() {
 		return []protocol.CodeLens{}, nil
 	}
 
-	return semanticDoc.codeLenses(), nil
+	// Resolve every lens up front in one workspace pass: the client then never
+	// calls CodeLensResolve, so there is no per-version command memo to go stale
+	// when a cross-file reference changes.
+	candidatePaths := s.referenceCandidatePaths()
+	resolveType := func(path string, result *ridl.ParseResult, name string) *definitionMatch {
+		return resolveTypeDefinitionWith(parse, path, result, name)
+	}
+	resolveError := func(path string, result *ridl.ParseResult, name string) *definitionMatch {
+		return resolveErrorDefinitionWith(parse, path, result, name)
+	}
+
+	base := semanticDoc.codeLenses()
+	lenses := make([]protocol.CodeLens, 0, len(base))
+	for i := range base {
+		data, ok := decodeCodeLensData(base[i].Data)
+		if !ok {
+			continue
+		}
+		target := semanticDoc.referenceTargetAt(
+			protocol.Position{Line: data.Line, Character: data.Character},
+			resolveType, resolveError,
+		)
+		if target == nil || target.definition == nil {
+			continue
+		}
+		locations := collectReferenceLocationsWith(parse, candidatePaths, s.contentForPath, target, false, resolveType, resolveError)
+		// Check after the (potentially expensive) cross-file collection so a
+		// cancelled request — including on the last/only symbol — never returns
+		// a partial under-counted result to the client.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		lens := base[i]
+		lens.Command = &protocol.Command{
+			Title:     referenceCountTitle(len(locations)),
+			Command:   showReferencesCommand,
+			Arguments: []any{protocol.DocumentURI(data.URI), base[i].Range.Start, locations},
+		}
+		lens.Data = nil
+		lenses = append(lenses, lens)
+	}
+
+	return lenses, nil
 }
 
+// CodeLensResolve is a passthrough: CodeLens returns fully-resolved lenses, so
+// resolution never needs to recompute.
 func (s *Server) CodeLensResolve(ctx context.Context, params *protocol.CodeLens) (*protocol.CodeLens, error) {
-	if params == nil || params.Command != nil {
-		return params, nil
-	}
-
-	data, ok := decodeCodeLensData(params.Data)
-	if !ok {
-		return params, nil
-	}
-
-	doc, ok := s.docs.Get(data.URI)
-	if !ok {
-		return params, nil
-	}
-
-	semanticDoc := newSemanticDocument(doc.Path, doc.Content, s.parsePathForNavigation(doc.Path))
-	if !semanticDoc.valid() {
-		return params, nil
-	}
-
-	target := semanticDoc.referenceTargetAt(protocol.Position{
-		Line:      data.Line,
-		Character: data.Character,
-	}, s.resolveTypeDefinition, s.resolveErrorDefinition)
-	if target == nil || target.definition == nil {
-		return params, nil
-	}
-
-	locations := s.collectReferenceLocations(target, false)
-	params.Command = &protocol.Command{
-		Title:     referenceCountTitle(len(locations)),
-		Command:   showReferencesCommand,
-		Arguments: []any{protocol.DocumentURI(data.URI), params.Range.Start, locations},
-	}
 	return params, nil
+}
+
+// newRequestParse builds a request-scoped parser that AST-parses each file at
+// most once: an open buffer's already-built result is reused; everything else is
+// parsed AST-only (no schema build, no import recursion). Keyed by cleaned path
+// so each file is parsed once per request.
+//
+// The overlay map is snapshotted once here; s.docs.FindByPath and s.contentForPath
+// read live document state on each miss. Handlers run concurrently, so a request
+// is eventually-consistent-by-design: a mid-request DidChange self-heals on the
+// client's next codeLens request.
+func (s *Server) newRequestParse(ctx context.Context) parseFn {
+	overlays := s.overlayContents()
+	memo := map[string]*ridl.ParseResult{}
+	return func(path string) *ridl.ParseResult {
+		// Honour request cancellation before each (possibly expensive) AST parse.
+		if ctx.Err() != nil {
+			return nil
+		}
+		key := filepath.Clean(path)
+		if result, ok := memo[key]; ok {
+			return result
+		}
+		var result *ridl.ParseResult
+		if doc, ok := s.docs.FindByPath(path); ok && doc.Result != nil && doc.Result.Root != nil {
+			result = doc.Result
+		} else {
+			result, _ = s.parser.ParseAST(ctx, s.workspace.Root(), path, overlays)
+		}
+		memo[key] = result
+		return result
+	}
 }
 
 func (d *semanticDocument) codeLenses() []protocol.CodeLens {

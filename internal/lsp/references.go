@@ -374,6 +374,25 @@ func skipWorkspaceDir(name string) bool {
 }
 
 func (s *Server) collectReferenceLocations(target *referenceTarget, includeDeclaration bool) []protocol.Location {
+	return collectReferenceLocationsWith(
+		s.parsePathForNavigation,
+		s.referenceCandidatePaths(),
+		s.contentForPath,
+		target,
+		includeDeclaration,
+		s.resolveTypeDefinition,
+		s.resolveErrorDefinition,
+	)
+}
+
+func collectReferenceLocationsWith(
+	parse parseFn,
+	candidatePaths []string,
+	contentFor func(path string) (string, bool),
+	target *referenceTarget,
+	includeDeclaration bool,
+	resolveType, resolveError defResolver,
+) []protocol.Location {
 	if target == nil || target.definition == nil {
 		return nil
 	}
@@ -381,19 +400,19 @@ func (s *Server) collectReferenceLocations(target *referenceTarget, includeDecla
 	locations := make([]protocol.Location, 0, 8)
 	seen := map[string]struct{}{}
 
-	for _, path := range s.referenceCandidatePaths() {
-		result := s.parsePathForNavigation(path)
+	for _, path := range candidatePaths {
+		result := parse(path)
 		if result == nil || result.Root == nil {
 			continue
 		}
 
-		content, ok := s.contentForPath(path)
+		content, ok := contentFor(path)
 		if !ok {
 			continue
 		}
 
 		doc := newSemanticDocument(path, content, result)
-		for _, location := range doc.referenceLocations(target, s.resolveTypeDefinition, s.resolveErrorDefinition, includeDeclaration) {
+		for _, location := range doc.referenceLocations(target, resolveType, resolveError, includeDeclaration) {
 			key := referenceLocationKey(location)
 			if _, ok := seen[key]; ok {
 				continue
