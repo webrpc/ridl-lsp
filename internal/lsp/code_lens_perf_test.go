@@ -31,7 +31,7 @@ func TestNewRequestParseMemoizesPerPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parse := srv.newRequestParse()
+	parse := srv.newRequestParse(context.Background())
 
 	r1 := parse(basePath)
 	if r1 == nil {
@@ -58,7 +58,7 @@ func TestNewRequestParseKeyedByCleanPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parse := srv.newRequestParse()
+	parse := srv.newRequestParse(context.Background())
 
 	// Two string paths that differ only by a redundant "." segment.
 	p1 := dir + "/base.ridl"

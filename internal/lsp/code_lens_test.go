@@ -151,6 +151,124 @@ func TestCodeLensResolveIsPassthrough(t *testing.T) {
 	}
 }
 
+// TestCodeLensImportedTypeRefCount asserts that the CodeLens on a type
+// declaration counts references from other files that import and use it.
+// base.ridl defines struct Base; user.ridl imports it and uses Base in a
+// field. The lens on Base must show "1 reference" (the field in user.ridl).
+// includeDeclaration is false in CodeLens, so the declaration itself does not
+// add to the count.
+func TestCodeLensImportedTypeRefCount(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	baseContent := `webrpc = v1
+
+name = base
+version = v0.0.1
+
+struct Base
+  - id: uint64
+`
+	basePath := filepath.Join(dir, "base.ridl")
+	if err := os.WriteFile(basePath, []byte(baseContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	userContent := `webrpc = v1
+
+name = user
+version = v0.0.1
+
+import
+  - base.ridl
+
+struct User
+  - base: Base
+`
+	userPath := filepath.Join(dir, "user.ridl")
+	if err := os.WriteFile(userPath, []byte(userContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Open base.ridl — CodeLens is requested on it; user.ridl is picked up via
+	// the workspace walk inside referenceCandidatePaths.
+	baseURI := fileURI(basePath)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(baseURI),
+			Text:    baseContent,
+			Version: 1,
+		},
+	})
+
+	lenses, err := srv.CodeLens(ctx, &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(baseURI)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	baseLens := findCodeLensAtPosition(lenses, positionAt(t, baseContent, "Base\n"))
+	if baseLens == nil {
+		t.Fatalf("missing code lens for Base declaration in %#v", lenses)
+	}
+	if baseLens.Command == nil {
+		t.Fatal("expected resolved code lens command, got nil")
+	}
+	if baseLens.Command.Title != "1 reference" {
+		t.Fatalf("expected \"1 reference\" for Base (used once in user.ridl field), got %q", baseLens.Command.Title)
+	}
+}
+
+// TestCodeLensErrorRefCount asserts that the CodeLens on an error declaration
+// counts the single method that lists it in its errors clause.
+func TestCodeLensErrorRefCount(t *testing.T) {
+	srv, _, dir := setupServer(t)
+	ctx := context.Background()
+
+	content := `webrpc = v1
+
+name = errtest
+version = v0.0.1
+
+error 1 Foo "msg" HTTP 404
+
+service FooService
+  - M() => (ok: bool) errors Foo
+`
+	path := filepath.Join(dir, "errref.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	_ = srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	lenses, err := srv.CodeLens(ctx, &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fooLens := findCodeLensAtPosition(lenses, positionAt(t, content, "Foo "))
+	if fooLens == nil {
+		t.Fatalf("missing code lens for Foo error declaration in %#v", lenses)
+	}
+	if fooLens.Command == nil {
+		t.Fatal("expected resolved code lens command, got nil")
+	}
+	if fooLens.Command.Title != "1 reference" {
+		t.Fatalf("expected \"1 reference\" for Foo error (used in M() errors clause), got %q", fooLens.Command.Title)
+	}
+}
+
 func findCodeLensAtPosition(lenses []protocol.CodeLens, pos protocol.Position) *protocol.CodeLens {
 	for i := range lenses {
 		lens := &lenses[i]

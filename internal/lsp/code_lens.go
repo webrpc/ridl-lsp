@@ -24,7 +24,7 @@ func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) 
 		return []protocol.CodeLens{}, nil
 	}
 
-	parse := s.newRequestParse()
+	parse := s.newRequestParse(ctx)
 	semanticDoc := newSemanticDocument(doc.Path, doc.Content, parse(doc.Path))
 	if !semanticDoc.valid() {
 		return []protocol.CodeLens{}, nil
@@ -44,6 +44,11 @@ func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) 
 	base := semanticDoc.codeLenses()
 	lenses := make([]protocol.CodeLens, 0, len(base))
 	for i := range base {
+		// Stop between symbols so a cancelled request never returns a partial
+		// under-counted result to the client.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		data, ok := decodeCodeLensData(base[i].Data)
 		if !ok {
 			continue
@@ -84,10 +89,14 @@ func (s *Server) CodeLensResolve(ctx context.Context, params *protocol.CodeLens)
 // read live document state on each miss. Handlers run concurrently, so a request
 // is eventually-consistent-by-design: a mid-request DidChange self-heals on the
 // client's next codeLens request.
-func (s *Server) newRequestParse() parseFn {
+func (s *Server) newRequestParse(ctx context.Context) parseFn {
 	overlays := s.overlayContents()
 	memo := map[string]*ridl.ParseResult{}
 	return func(path string) *ridl.ParseResult {
+		// Honour request cancellation before each (possibly expensive) AST parse.
+		if ctx.Err() != nil {
+			return nil
+		}
 		key := filepath.Clean(path)
 		if result, ok := memo[key]; ok {
 			return result
@@ -96,7 +105,7 @@ func (s *Server) newRequestParse() parseFn {
 		if doc, ok := s.docs.FindByPath(path); ok && doc.Result != nil && doc.Result.Root != nil {
 			result = doc.Result
 		} else {
-			result, _ = s.parser.ParseAST(context.Background(), s.workspace.Root(), path, overlays)
+			result, _ = s.parser.ParseAST(ctx, s.workspace.Root(), path, overlays)
 		}
 		memo[key] = result
 		return result
