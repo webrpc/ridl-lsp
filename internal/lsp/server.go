@@ -28,6 +28,12 @@ type Server struct {
 	workspaceMu sync.RWMutex
 	gen         atomic.Uint64
 
+	// cacheEnabled is set true only after the client confirms watcher registration,
+	// ensuring the parse cache is only used when invalidation events are guaranteed.
+	cacheEnabled atomic.Bool
+	// watchSupported is captured from InitializeParams and stays immutable after Initialize returns.
+	watchSupported bool
+
 	shutdown atomic.Bool
 	// exitProcess is os.Exit in production; injectable so the exit-code contract
 	// can be tested without terminating the test binary.
@@ -54,6 +60,11 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 		s.workspace.SetRootFromURI(string(params.RootURI)) //nolint:staticcheck
 	} else if params.RootPath != "" { //nolint:staticcheck // RootPath fallback for legacy clients
 		s.workspace.SetRoot(params.RootPath) //nolint:staticcheck
+	}
+
+	// Initialize runs once before any concurrent handler; plain field write is safe.
+	if ws := params.Capabilities.Workspace; ws != nil && ws.DidChangeWatchedFiles != nil {
+		s.watchSupported = ws.DidChangeWatchedFiles.DynamicRegistration
 	}
 
 	return &protocol.InitializeResult{
@@ -118,7 +129,25 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 	}, nil
 }
 
+// Initialized registers **/*.ridl file watchers and gates the parse cache on success.
 func (s *Server) Initialized(ctx context.Context, params *protocol.InitializedParams) error {
+	if !s.watchSupported || s.client == nil {
+		return nil
+	}
+	err := s.client.RegisterCapability(ctx, &protocol.RegistrationParams{
+		Registrations: []protocol.Registration{{
+			ID:     "ridl-watch-files",
+			Method: "workspace/didChangeWatchedFiles",
+			RegisterOptions: protocol.DidChangeWatchedFilesRegistrationOptions{
+				Watchers: []protocol.FileSystemWatcher{{GlobPattern: "**/*.ridl"}},
+			},
+		}},
+	})
+	if err != nil {
+		s.logger.Warn("ridl-lsp: file watcher registration failed; session parse cache disabled", zap.Error(err))
+		return nil
+	}
+	s.cacheEnabled.Store(true)
 	return nil
 }
 
