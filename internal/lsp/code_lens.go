@@ -41,9 +41,10 @@ func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) 
 		return resolveErrorDefinitionWith(parse, path, result, name)
 	}
 
-	lenses := semanticDoc.codeLenses()
-	for i := range lenses {
-		data, ok := decodeCodeLensData(lenses[i].Data)
+	base := semanticDoc.codeLenses()
+	lenses := make([]protocol.CodeLens, 0, len(base))
+	for i := range base {
+		data, ok := decodeCodeLensData(base[i].Data)
 		if !ok {
 			continue
 		}
@@ -55,12 +56,14 @@ func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) 
 			continue
 		}
 		locations := collectReferenceLocationsWith(parse, candidatePaths, s.contentForPath, target, false, resolveType, resolveError)
-		lenses[i].Command = &protocol.Command{
+		lens := base[i]
+		lens.Command = &protocol.Command{
 			Title:     referenceCountTitle(len(locations)),
 			Command:   showReferencesCommand,
-			Arguments: []any{protocol.DocumentURI(data.URI), lenses[i].Range.Start, locations},
+			Arguments: []any{protocol.DocumentURI(data.URI), base[i].Range.Start, locations},
 		}
-		lenses[i].Data = nil
+		lens.Data = nil
+		lenses = append(lenses, lens)
 	}
 
 	return lenses, nil
@@ -76,6 +79,11 @@ func (s *Server) CodeLensResolve(ctx context.Context, params *protocol.CodeLens)
 // most once: an open buffer's already-built result is reused; everything else is
 // parsed AST-only (no schema build, no import recursion). Keyed by cleaned path
 // so each file is parsed once per request.
+//
+// The overlay map is snapshotted once here; s.docs.FindByPath and s.contentForPath
+// read live document state on each miss. Handlers run concurrently, so a request
+// is eventually-consistent-by-design: a mid-request DidChange self-heals on the
+// client's next codeLens request.
 func (s *Server) newRequestParse() parseFn {
 	overlays := s.overlayContents()
 	memo := map[string]*ridl.ParseResult{}

@@ -61,8 +61,10 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 			DocumentOnTypeFormattingProvider: &protocol.DocumentOnTypeFormattingOptions{
 				FirstTriggerCharacter: onTypeFormattingTrigger,
 			},
+			// ResolveProvider is false: CodeLens returns fully-resolved lenses, so
+			// clients must not call codeLens/resolve.
 			CodeLensProvider: &protocol.CodeLensOptions{
-				ResolveProvider: true,
+				ResolveProvider: false,
 			},
 			ColorProvider:                   true,
 			DocumentFormattingProvider:      true,
