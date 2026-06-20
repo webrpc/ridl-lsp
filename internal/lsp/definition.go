@@ -68,23 +68,35 @@ func (s *Server) parsePath(ctx context.Context, path string) *ridl.ParseResult {
 	return result
 }
 
+type parseFn func(path string) *ridl.ParseResult
+
+type defResolver func(path string, result *ridl.ParseResult, name string) *definitionMatch
+
 func (s *Server) resolveTypeDefinition(path string, result *ridl.ParseResult, name string) *definitionMatch {
-	if name == "" || isBuiltInRIDLType(name) {
-		return nil
-	}
-	return s.resolveNamedDefinition(path, result, name, findTypeDefinitionToken)
+	return resolveTypeDefinitionWith(s.parsePathForNavigation, path, result, name)
 }
 
 func (s *Server) resolveErrorDefinition(path string, result *ridl.ParseResult, name string) *definitionMatch {
+	return resolveErrorDefinitionWith(s.parsePathForNavigation, path, result, name)
+}
+
+func resolveTypeDefinitionWith(parse parseFn, path string, result *ridl.ParseResult, name string) *definitionMatch {
+	if name == "" || isBuiltInRIDLType(name) {
+		return nil
+	}
+	return resolveNamedDefinitionWith(parse, path, result, name, findTypeDefinitionToken)
+}
+
+func resolveErrorDefinitionWith(parse parseFn, path string, result *ridl.ParseResult, name string) *definitionMatch {
 	if name == "" {
 		return nil
 	}
-	return s.resolveNamedDefinition(path, result, name, findErrorDefinitionToken)
+	return resolveNamedDefinitionWith(parse, path, result, name, findErrorDefinitionToken)
 }
 
 type definitionFinder func(root *ridl.RootNode, name string) *ridl.TokenNode
 
-func (s *Server) resolveNamedDefinition(path string, result *ridl.ParseResult, name string, finder definitionFinder) *definitionMatch {
+func resolveNamedDefinitionWith(parse parseFn, path string, result *ridl.ParseResult, name string, finder definitionFinder) *definitionMatch {
 	if result == nil || result.Root == nil {
 		return nil
 	}
@@ -94,10 +106,10 @@ func (s *Server) resolveNamedDefinition(path string, result *ridl.ParseResult, n
 	}
 
 	visited := map[string]struct{}{path: {}}
-	return s.resolveImportedDefinition(path, result.Root, name, visited, finder)
+	return resolveImportedDefinitionWith(parse, path, result.Root, name, visited, finder)
 }
 
-func (s *Server) resolveImportedDefinition(path string, root *ridl.RootNode, name string, visited map[string]struct{}, finder definitionFinder) *definitionMatch {
+func resolveImportedDefinitionWith(parse parseFn, path string, root *ridl.RootNode, name string, visited map[string]struct{}, finder definitionFinder) *definitionMatch {
 	if root == nil {
 		return nil
 	}
@@ -113,7 +125,7 @@ func (s *Server) resolveImportedDefinition(path string, root *ridl.RootNode, nam
 		}
 		visited[importPath] = struct{}{}
 
-		importResult := s.parsePathForNavigation(importPath)
+		importResult := parse(importPath)
 		if importResult == nil || importResult.Root == nil {
 			continue
 		}
@@ -122,7 +134,7 @@ func (s *Server) resolveImportedDefinition(path string, root *ridl.RootNode, nam
 			return definitionForToken(importPath, token)
 		}
 
-		if match := s.resolveImportedDefinition(importPath, importResult.Root, name, visited, finder); match != nil {
+		if match := resolveImportedDefinitionWith(parse, importPath, importResult.Root, name, visited, finder); match != nil {
 			return match
 		}
 	}
