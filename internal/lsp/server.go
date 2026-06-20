@@ -21,7 +21,8 @@ type Server struct {
 	client    protocol.Client
 	logger    *zap.Logger
 
-	parseCache *parseCache
+	parseCache         *parseCache
+	candidatePathCache *candidatePathCache
 
 	// workspaceMu guards docs mutations and gen bumps so the two are always
 	// seen together by any reader that loads gen as a cache key.
@@ -42,12 +43,13 @@ type Server struct {
 
 func NewServer(logger *zap.Logger) *Server {
 	return &Server{
-		docs:        documents.NewStore(),
-		workspace:   workspace.NewManager(),
-		parser:      ridlparser.NewParser(),
-		logger:      logger,
-		exitProcess: os.Exit,
-		parseCache:  newParseCache(),
+		docs:               documents.NewStore(),
+		workspace:          workspace.NewManager(),
+		parser:             ridlparser.NewParser(),
+		logger:             logger,
+		exitProcess:        os.Exit,
+		parseCache:         newParseCache(),
+		candidatePathCache: newCandidatePathCache(),
 	}
 }
 

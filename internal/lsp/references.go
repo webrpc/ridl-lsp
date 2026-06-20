@@ -311,6 +311,28 @@ func (d *semanticDocument) identifierRangeInToken(token *ridl.TokenNode, pos pro
 }
 
 func (s *Server) referenceCandidatePaths() []string {
+	if !s.cacheEnabled.Load() {
+		return s.walkCandidatePaths()
+	}
+
+	s.workspaceMu.RLock()
+	gen := s.gen.Load()
+	if cached, ok := s.candidatePathCache.get(gen); ok {
+		s.workspaceMu.RUnlock()
+		// Cached slice is READ-ONLY — callers must not mutate it.
+		return cached
+	}
+	s.workspaceMu.RUnlock()
+
+	paths := s.walkCandidatePaths()
+	// Only store if gen hasn't advanced while we were walking.
+	if s.gen.Load() == gen {
+		s.candidatePathCache.put(gen, paths)
+	}
+	return paths
+}
+
+func (s *Server) walkCandidatePaths() []string {
 	seen := map[string]struct{}{}
 	paths := make([]string, 0, len(s.docs.All()))
 
