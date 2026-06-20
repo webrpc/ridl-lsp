@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"os"
+	"sync"
 	"sync/atomic"
 
 	"go.lsp.dev/protocol"
@@ -21,6 +22,11 @@ type Server struct {
 	logger    *zap.Logger
 
 	parseCache *parseCache
+
+	// workspaceMu guards docs mutations and gen bumps so the two are always
+	// seen together by any reader that loads gen as a cache key.
+	workspaceMu sync.RWMutex
+	gen         atomic.Uint64
 
 	shutdown atomic.Bool
 	// exitProcess is os.Exit in production; injectable so the exit-code contract
@@ -144,7 +150,10 @@ func (s *Server) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocume
 		Version: params.TextDocument.Version,
 	}
 
+	s.workspaceMu.Lock()
 	s.docs.Set(doc)
+	s.gen.Add(1)
+	s.workspaceMu.Unlock()
 	s.refreshOpenDocuments(ctx)
 	return nil
 }
@@ -163,7 +172,10 @@ func (s *Server) DidChange(ctx context.Context, params *protocol.DidChangeTextDo
 		updated.Content = params.ContentChanges[len(params.ContentChanges)-1].Text
 		updated.Version = params.TextDocument.Version
 		updated.Result = nil
+		s.workspaceMu.Lock()
 		s.docs.Set(&updated)
+		s.gen.Add(1)
+		s.workspaceMu.Unlock()
 		s.refreshOpenDocuments(ctx)
 	}
 
@@ -172,7 +184,10 @@ func (s *Server) DidChange(ctx context.Context, params *protocol.DidChangeTextDo
 
 func (s *Server) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := string(params.TextDocument.URI)
+	s.workspaceMu.Lock()
 	s.docs.Delete(uri)
+	s.gen.Add(1)
+	s.workspaceMu.Unlock()
 	if s.client != nil {
 		_ = s.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
 			URI:         protocol.DocumentURI(uri),

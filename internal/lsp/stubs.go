@@ -44,6 +44,9 @@ func (s *Server) DidChangeWatchedFiles(ctx context.Context, params *protocol.Did
 			continue
 		}
 
+		s.workspaceMu.Lock()
+		s.gen.Add(1)
+		s.workspaceMu.Unlock()
 		s.refreshOpenDocuments(ctx)
 		break
 	}
