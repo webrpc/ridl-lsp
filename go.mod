@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/webrpc/ridlfmt v0.2.4
-	github.com/webrpc/webrpc v0.36.2-0.20260321072159-3267f049abfb
+	github.com/webrpc/webrpc v0.37.4
 	go.lsp.dev/jsonrpc2 v0.10.0
 	go.lsp.dev/protocol v0.12.0
 	go.uber.org/zap v1.27.0
