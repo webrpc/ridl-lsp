@@ -54,16 +54,12 @@ func main() {
 	)
 	conn.Go(ctx, protocol.Handlers(handler))
 
+	// The LSP `exit` notification drives the spec exit code from the Exit handler.
+	// Here we only handle the transport: a bare stream close (the common editor
+	// teardown) and OS signals both exit 0.
 	select {
 	case <-conn.Done():
-		// Client closed the stream. Per the LSP spec, exit 0 only if shutdown was
-		// received first; a drop without shutdown is abnormal and exits non-zero.
-		if !server.ShutdownReceived() {
-			_ = logger.Sync() //nolint:errcheck // best-effort flush before non-zero exit
-			os.Exit(1)
-		}
 	case <-ctx.Done():
-		// SIGINT/SIGTERM: close the connection and exit cleanly.
 		log.Println("ridl-lsp: signal received, shutting down")
 		_ = conn.Close()
 	}
