@@ -55,8 +55,14 @@ service TestService
 	if userLens == nil {
 		t.Fatalf("missing code lens for User declaration in %#v", lenses)
 	}
-	if userLens.Command != nil {
-		t.Fatalf("expected unresolved code lens command, got %#v", userLens.Command)
+	if userLens.Command == nil {
+		t.Fatalf("expected eager resolved code lens command, got nil")
+	}
+	if userLens.Command.Command != showReferencesCommand {
+		t.Fatalf("unexpected code lens command %q", userLens.Command.Command)
+	}
+	if userLens.Data != nil {
+		t.Fatalf("expected Data cleared on resolved lens, got %#v", userLens.Data)
 	}
 
 	notFoundLens := findCodeLensAtPosition(lenses, positionAt(t, content, "UserNotFound"))
@@ -65,7 +71,7 @@ service TestService
 	}
 }
 
-func TestCodeLensResolveBuildsShowReferencesCommand(t *testing.T) {
+func TestCodeLensBuildsShowReferencesCommand(t *testing.T) {
 	srv, _, dir := setupServer(t)
 	ctx := context.Background()
 
@@ -106,30 +112,42 @@ service TestService
 	if lens == nil {
 		t.Fatalf("missing code lens for User declaration in %#v", lenses)
 	}
-
-	resolved, err := srv.CodeLensResolve(ctx, lens)
-	if err != nil {
-		t.Fatal(err)
+	if lens.Command == nil {
+		t.Fatalf("expected resolved code lens command, got nil")
 	}
-	if resolved == nil || resolved.Command == nil {
-		t.Fatalf("expected resolved code lens command, got %#v", resolved)
+	if lens.Command.Command != showReferencesCommand {
+		t.Fatalf("unexpected code lens command %q", lens.Command.Command)
 	}
-	if resolved.Command.Command != showReferencesCommand {
-		t.Fatalf("unexpected code lens command %q", resolved.Command.Command)
+	if lens.Command.Title != "2 references" {
+		t.Fatalf("unexpected code lens title %q", lens.Command.Title)
 	}
-	if resolved.Command.Title != "2 references" {
-		t.Fatalf("unexpected code lens title %q", resolved.Command.Title)
-	}
-	if len(resolved.Command.Arguments) != 3 {
-		t.Fatalf("expected show-references arguments, got %#v", resolved.Command.Arguments)
+	if len(lens.Command.Arguments) != 3 {
+		t.Fatalf("expected show-references arguments, got %#v", lens.Command.Arguments)
 	}
 
-	locations, ok := resolved.Command.Arguments[2].([]protocol.Location)
+	locations, ok := lens.Command.Arguments[2].([]protocol.Location)
 	if !ok {
-		t.Fatalf("expected reference locations in code lens args, got %#v", resolved.Command.Arguments[2])
+		t.Fatalf("expected reference locations in code lens args, got %#v", lens.Command.Arguments[2])
 	}
 	if len(locations) != 2 {
 		t.Fatalf("expected 2 reference locations, got %#v", locations)
+	}
+}
+
+func TestCodeLensResolveIsPassthrough(t *testing.T) {
+	srv, _, _ := setupServer(t)
+	ctx := context.Background()
+
+	in := &protocol.CodeLens{
+		Range:   protocol.Range{Start: protocol.Position{Line: 4}},
+		Command: &protocol.Command{Title: "1 reference", Command: showReferencesCommand},
+	}
+	out, err := srv.CodeLensResolve(ctx, in)
+	if err != nil {
+		t.Fatalf("CodeLensResolve error: %v", err)
+	}
+	if out != in {
+		t.Fatal("expected CodeLensResolve to return the same lens unchanged")
 	}
 }
 
