@@ -48,8 +48,11 @@ func main() {
 	ctx = protocol.WithClient(ctx, client)
 	server.SetClient(client)
 
-	serverHandler := lsp.RecoverHandler(
-		protocol.ServerHandler(server, jsonrpc2.MethodNotFoundHandler),
+	serverHandler := lsp.ObserveHandler(
+		lsp.RecoverHandler(
+			protocol.ServerHandler(server, jsonrpc2.MethodNotFoundHandler),
+			logger,
+		),
 		logger,
 	)
 	asyncHandler := protocol.Handlers(serverHandler)
