@@ -226,6 +226,51 @@ func (p *Parser) parse(ctx context.Context, workspace, path string, overlays map
 	return result, nil
 }
 
+// ParseAST parses only the RIDL AST at path (overlay-aware), skipping schema
+// construction and recursive import resolution. Root is identical to Parse;
+// Schema is left empty.
+func (p *Parser) ParseAST(ctx context.Context, workspace, path string, overlays map[string]string) (*ParseResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	fsys, _, relPath, err := parserFS(workspace, path, overlays)
+	if err != nil {
+		return nil, err
+	}
+
+	src, err := fs.ReadFile(fsys, relPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Non-nil empty schema so semanticDocument.valid() passes for AST-only
+	// readers (reference counting reads Root, never Schema).
+	result := &ParseResult{Schema: &schema.WebRPCSchema{
+		Types:    []*schema.Type{},
+		Errors:   []*schema.Error{},
+		Services: []*schema.Service{},
+	}}
+
+	astParser, err := newUpstreamParser(relPath, src)
+	if err != nil {
+		result.Errors = []error{err}
+		return result, nil
+	}
+
+	if err := runUpstreamParser(astParser); err != nil {
+		// Best-effort: keep the partial root so mid-edit features still work.
+		rootNode := astParser.root
+		result.Root = &rootNode
+		result.Errors = []error{err}
+		return result, nil
+	}
+
+	rootNode := astParser.root
+	result.Root = &rootNode
+	return result, nil
+}
+
 // These substrings couple us to upstream webrpc error wording — there is no typed
 // error to match on. TestVersionRequiredErrorFormat pins them so an upstream bump
 // that changes the wording fails CI instead of silently breaking import handling.
