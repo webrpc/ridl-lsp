@@ -750,12 +750,11 @@ func typeTargetName(beforeColon string) string {
 }
 
 func hasCompletedTypeExpr(afterColon string) bool {
-	runes := []rune(afterColon)
 	angleDepth := 0
 	squareDepth := 0
 	parenDepth := 0
 
-	for _, r := range runes {
+	for _, r := range afterColon {
 		switch r {
 		case '<':
 			angleDepth++
