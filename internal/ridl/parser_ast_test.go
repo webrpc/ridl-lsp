@@ -40,4 +40,7 @@ func TestParseASTSkipsImportResolution(t *testing.T) {
 	if result == nil || result.Root == nil || len(result.Root.Structs()) != 1 {
 		t.Fatal("expected this file's Root regardless of missing import")
 	}
+	if result.Schema == nil {
+		t.Fatal("expected non-nil Schema")
+	}
 }
