@@ -70,6 +70,9 @@ func TestNewRequestParseKeyedByCleanPath(t *testing.T) {
 	}
 
 	r2 := parse(p2)
+	if r2 == nil {
+		t.Fatal("expected non-nil ParseResult for p2, got nil")
+	}
 	if r1 != r2 {
 		t.Errorf("different un-cleaned paths that resolve to the same file returned different ParseResult pointers — clean-path keying is broken")
 	}
