@@ -57,13 +57,19 @@ func TestParsePathReparsesAfterGenBump(t *testing.T) {
 		t.Fatal("expected non-nil result from first parse")
 	}
 
+	// r2 must hit the cache — same pointer proves the entry was populated.
+	r2 := srv.parsePath(context.Background(), basePath)
+	if r2 != r1 {
+		t.Fatal("expected cache hit before gen bump: r2 should be the same pointer as r1")
+	}
+
 	srv.gen.Add(1)
 
 	r3 := srv.parsePath(context.Background(), basePath)
+	// gen bump must drop the cache → fresh non-nil pointer
 	if r3 == nil {
 		t.Fatal("expected non-nil result after gen bump")
 	}
-	// gen bump must drop the cache → fresh pointer
 	if r3 == r1 {
 		t.Fatal("expected fresh parse after gen bump: r3 should differ from r1")
 	}
