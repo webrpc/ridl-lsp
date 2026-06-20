@@ -48,11 +48,25 @@ func main() {
 	ctx = protocol.WithClient(ctx, client)
 	server.SetClient(client)
 
-	handler := lsp.RecoverHandler(
+	serverHandler := lsp.RecoverHandler(
 		protocol.ServerHandler(server, jsonrpc2.MethodNotFoundHandler),
 		logger,
 	)
-	conn.Go(ctx, protocol.Handlers(handler))
+	asyncHandler := protocol.Handlers(serverHandler)
+	// Dispatch the lifecycle methods synchronously. protocol.Handlers' AsyncHandler
+	// runs each request in its own goroutine, which races process teardown two ways:
+	// `exit` could lose to conn.Done() reading the trailing EOF (→ wrong exit 0),
+	// and `exit` could read the shutdown flag before an async `shutdown` sets it.
+	// Running both in the read loop, in arrival order, makes the exit code reliable.
+	syncHandler := jsonrpc2.ReplyHandler(serverHandler)
+	handler := jsonrpc2.Handler(func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		switch req.Method() {
+		case protocol.MethodShutdown, protocol.MethodExit:
+			return syncHandler(ctx, reply, req)
+		}
+		return asyncHandler(ctx, reply, req)
+	})
+	conn.Go(ctx, handler)
 
 	// The LSP `exit` notification drives the spec exit code from the Exit handler.
 	// Here we only handle the transport: a bare stream close (the common editor
