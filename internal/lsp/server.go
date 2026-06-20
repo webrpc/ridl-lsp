@@ -131,9 +131,14 @@ func (s *Server) DidChange(ctx context.Context, params *protocol.DidChangeTextDo
 	}
 
 	if len(params.ContentChanges) > 0 {
-		doc.Content = params.ContentChanges[len(params.ContentChanges)-1].Text
-		doc.Version = params.TextDocument.Version
-		s.docs.Set(doc)
+		// Copy-on-write: never mutate the stored *Document in place, since other
+		// handlers may hold the prior snapshot. The new content invalidates the
+		// cached parse result.
+		updated := *doc
+		updated.Content = params.ContentChanges[len(params.ContentChanges)-1].Text
+		updated.Version = params.TextDocument.Version
+		updated.Result = nil
+		s.docs.Set(&updated)
 		s.refreshOpenDocuments(ctx)
 	}
 

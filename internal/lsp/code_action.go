@@ -216,7 +216,9 @@ func (s *Server) missingImportCandidates(doc *semanticDocument) []missingImportC
 	candidates := make([]missingImportCandidate, 0, 4)
 	seen := map[string]struct{}{}
 	for _, unresolved := range doc.unresolvedSymbols(s.resolveTypeDefinition, s.resolveErrorDefinition) {
-		targetPath, ok := s.uniqueImportCandidatePath(doc.path, unresolved.kind, unresolved.name)
+		// Interactive code action: uses the background parser, consistent with the
+		// other navigation paths (see parsePathForNavigation).
+		targetPath, ok := s.uniqueImportCandidatePath(context.Background(), doc.path, unresolved.kind, unresolved.name)
 		if !ok || docHasImportedPath(doc, targetPath) {
 			continue
 		}
@@ -522,16 +524,21 @@ func unresolvedTypeNames(expr string) []string {
 	return names
 }
 
-func (s *Server) uniqueImportCandidatePath(docPath string, kind referenceKind, name string) (string, bool) {
+func (s *Server) uniqueImportCandidatePath(ctx context.Context, docPath string, kind referenceKind, name string) (string, bool) {
 	var definers, reExporters []string
 	seen := map[string]struct{}{}
 
 	for _, path := range s.referenceCandidatePaths() {
+		// This scans and parses every candidate in the workspace; bail promptly
+		// when the driving request (e.g. a diagnostics refresh) is cancelled.
+		if ctx.Err() != nil {
+			return "", false
+		}
 		if path == "" || path == docPath {
 			continue
 		}
 
-		result := s.parsePathForNavigation(path)
+		result := s.parsePath(ctx, path)
 		if result == nil || result.Root == nil {
 			continue
 		}
@@ -1066,9 +1073,9 @@ func (s *Server) transitiveReImportCodeActions(doc *documents.Document, diagnost
 				continue
 			}
 
-			originalPath, ok := s.uniqueImportCandidatePath(doc.Path, referenceKindType, name)
+			originalPath, ok := s.uniqueImportCandidatePath(context.Background(), doc.Path, referenceKindType, name)
 			if !ok {
-				originalPath, ok = s.uniqueImportCandidatePath(doc.Path, referenceKindError, name)
+				originalPath, ok = s.uniqueImportCandidatePath(context.Background(), doc.Path, referenceKindError, name)
 			}
 			if !ok {
 				continue

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go.lsp.dev/protocol"
+	"go.uber.org/zap"
 
 	ridl "github.com/webrpc/ridl-lsp/internal/ridl"
 )
@@ -330,8 +331,23 @@ func (s *Server) referenceCandidatePaths() []string {
 		return paths
 	}
 
-	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry == nil || entry.IsDir() || filepath.Ext(path) != ".ridl" {
+	walkErr := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			// Degrade to partial results instead of silently truncating: a
+			// swallowed error reads as "searched the whole workspace" when it didn't.
+			s.logger.Warn("workspace scan: skipping unreadable entry", zap.String("path", path), zap.Error(err))
+			return nil
+		}
+		if entry.IsDir() {
+			// Pruning keeps a monorepo scan bounded — these trees never hold
+			// project schemas but can be enormous, and the scan runs synchronously
+			// on the request.
+			if path != root && skipWorkspaceDir(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".ridl" {
 			return nil
 		}
 		if _, ok := seen[path]; ok {
@@ -341,9 +357,20 @@ func (s *Server) referenceCandidatePaths() []string {
 		paths = append(paths, path)
 		return nil
 	})
+	if walkErr != nil {
+		s.logger.Warn("workspace scan did not complete", zap.String("root", root), zap.Error(walkErr))
+	}
 
 	sort.Strings(paths)
 	return paths
+}
+
+func skipWorkspaceDir(name string) bool {
+	switch name {
+	case ".git", "node_modules", "vendor":
+		return true
+	}
+	return strings.HasPrefix(name, ".")
 }
 
 func (s *Server) collectReferenceLocations(target *referenceTarget, includeDeclaration bool) []protocol.Location {

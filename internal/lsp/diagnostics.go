@@ -21,8 +21,10 @@ var (
 )
 
 func (s *Server) parseAndPublishDiagnostics(ctx context.Context, doc *documents.Document) {
-	diagnostics := s.parseDocument(doc)
-	if s.client == nil {
+	diagnostics := s.parseDocument(ctx, doc)
+	// A cancelled/superseded request must not overwrite the client's diagnostics
+	// with a half-computed (or empty) set.
+	if ctx.Err() != nil || s.client == nil {
 		return
 	}
 
@@ -34,12 +36,19 @@ func (s *Server) parseAndPublishDiagnostics(ctx context.Context, doc *documents.
 	}
 }
 
-func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
+func (s *Server) parseDocument(ctx context.Context, doc *documents.Document) []protocol.Diagnostic {
 	overlays := s.overlayContents()
 
-	result, err := s.parser.Parse(s.workspace.Root(), doc.Path, overlays)
+	result, err := s.parser.Parse(ctx, s.workspace.Root(), doc.Path, overlays)
+	// Bail before touching anything on cancellation. Import recursion swallows
+	// ctx errors as skipped imports, so Parse can return err == nil with an
+	// incomplete result after a cancel — caching that would poison the document's
+	// state, and surfacing ctx.Err() as a diagnostic would flash a bogus error.
+	if ctx.Err() != nil {
+		return nil
+	}
 	if err != nil {
-		doc.Result = nil
+		s.docs.SetResult(doc.URI, doc.Version, nil)
 		return []protocol.Diagnostic{
 			{
 				Range:    lineRange(1),
@@ -51,11 +60,14 @@ func (s *Server) parseDocument(doc *documents.Document) []protocol.Diagnostic {
 	}
 
 	if len(result.Errors) == 0 {
-		doc.Result = result
-		return s.importDiagnostics(doc)
+		s.docs.SetResult(doc.URI, doc.Version, result)
+		return s.importDiagnostics(ctx, doc, result)
 	}
 
-	doc.Result = nil
+	// Cache the partial result even with parse errors: the parser still produces
+	// a best-effort AST (Root is populated), and reusing it lets navigation work
+	// — and avoids a re-parse per request — while the user is mid-edit.
+	s.docs.SetResult(doc.URI, doc.Version, result)
 
 	diagnostics := make([]protocol.Diagnostic, 0, len(result.Errors))
 	for _, e := range result.Errors {
@@ -151,16 +163,16 @@ func severityWarning() protocol.DiagnosticSeverity {
 	return protocol.DiagnosticSeverityWarning
 }
 
-func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnostic {
-	if doc == nil || doc.Result == nil || doc.Result.Root == nil {
+func (s *Server) importDiagnostics(ctx context.Context, doc *documents.Document, result *ridl.ParseResult) []protocol.Diagnostic {
+	if doc == nil || result == nil || result.Root == nil {
 		return nil
 	}
 
-	semanticDoc := newSemanticDocument(doc.Path, doc.Content, doc.Result)
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, result)
 	referenced := semanticDoc.referencedNames()
 
 	var diagnostics []protocol.Diagnostic
-	for _, importNode := range doc.Result.Root.Imports() {
+	for _, importNode := range result.Root.Imports() {
 		if importNode == nil || importNode.Path() == nil {
 			continue
 		}
@@ -172,7 +184,7 @@ func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnosti
 		importPath := importNode.Path().String()
 		resolvedPath := workspace.ResolveImportPath(doc.Path, importPath)
 
-		importResult, err := s.parser.Parse(s.workspace.Root(), resolvedPath, s.overlayContents())
+		importResult, err := s.parser.Parse(ctx, s.workspace.Root(), resolvedPath, s.overlayContents())
 		if err != nil || importResult == nil || importResult.Root == nil {
 			continue
 		}
@@ -224,13 +236,13 @@ func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnosti
 	}
 
 	// Check selective imports for transitive re-imports.
-	for _, importNode := range doc.Result.Root.Imports() {
+	for _, importNode := range result.Root.Imports() {
 		if importNode == nil || importNode.Path() == nil || len(importNode.Members()) == 0 {
 			continue
 		}
 
 		importPath := workspace.ResolveImportPath(doc.Path, importNode.Path().String())
-		importResult := s.parsePathForNavigation(importPath)
+		importResult := s.parsePath(ctx, importPath)
 		if importResult == nil || importResult.Root == nil {
 			continue
 		}
@@ -247,9 +259,9 @@ func (s *Server) importDiagnostics(doc *documents.Document) []protocol.Diagnosti
 				continue
 			}
 
-			originalPath, ok := s.uniqueImportCandidatePath(doc.Path, referenceKindType, name)
+			originalPath, ok := s.uniqueImportCandidatePath(ctx, doc.Path, referenceKindType, name)
 			if !ok {
-				originalPath, ok = s.uniqueImportCandidatePath(doc.Path, referenceKindError, name)
+				originalPath, ok = s.uniqueImportCandidatePath(ctx, doc.Path, referenceKindError, name)
 			}
 			if !ok {
 				continue
