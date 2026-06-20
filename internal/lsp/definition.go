@@ -57,13 +57,50 @@ func (s *Server) parsePathForNavigation(path string) *ridl.ParseResult {
 }
 
 func (s *Server) parsePath(ctx context.Context, path string) *ridl.ParseResult {
-	if doc, ok := s.docs.FindByPath(path); ok && doc.Result != nil && doc.Result.Root != nil {
-		return doc.Result
+	if ctx.Err() != nil {
+		return nil
 	}
 
-	result, err := s.parser.Parse(ctx, s.workspace.Root(), path, s.overlayContents())
-	if err != nil {
+	s.workspaceMu.RLock()
+	doc, open := s.docs.FindByPath(path)
+	if open {
+		if doc.Result != nil && doc.Result.Root != nil {
+			s.workspaceMu.RUnlock()
+			return doc.Result
+		}
+		overlays := s.overlayContents()
+		s.workspaceMu.RUnlock()
+		result, err := s.parser.Parse(ctx, s.workspace.Root(), path, overlays)
+		if err != nil || ctx.Err() != nil {
+			return nil
+		}
+		return result
+	}
+
+	if !s.cacheEnabled.Load() {
+		overlays := s.overlayContents()
+		s.workspaceMu.RUnlock()
+		result, err := s.parser.Parse(ctx, s.workspace.Root(), path, overlays)
+		if err != nil || ctx.Err() != nil {
+			return nil
+		}
+		return result
+	}
+
+	gen := s.gen.Load()
+	if result, ok := s.parseCache.get(path, gen); ok {
+		s.workspaceMu.RUnlock()
+		return result
+	}
+	overlays := s.overlayContents()
+	s.workspaceMu.RUnlock()
+
+	result, err := s.parser.Parse(ctx, s.workspace.Root(), path, overlays)
+	if err != nil || ctx.Err() != nil {
 		return nil
+	}
+	if s.gen.Load() == gen {
+		s.parseCache.put(path, gen, result)
 	}
 	return result
 }
