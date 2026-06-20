@@ -269,6 +269,54 @@ service FooService
 	}
 }
 
+// TestCodeLensReturnsErrorOnCanceledContext verifies that CodeLens propagates
+// ctx.Err() rather than returning a (misleading) nil-error empty/partial result
+// when the request context is already cancelled.
+//
+// DidOpen uses a live context so s.docs.Get succeeds and the test exercises the
+// ctx check inside CodeLens itself — if DidOpen also used the cancelled ctx the
+// doc would never be registered and the early-exit `!ok` branch would mask the
+// real assertion.
+func TestCodeLensReturnsErrorOnCanceledContext(t *testing.T) {
+	srv, _, dir := setupServer(t)
+
+	content := `webrpc = v1
+
+name = canceltest
+version = v0.0.1
+
+struct Foo
+  - id: uint64
+`
+	path := filepath.Join(dir, "cancel.ridl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	uri := fileURI(path)
+	// Register the document with a live context so s.docs.Get succeeds.
+	_ = srv.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     protocol.DocumentURI(uri),
+			Text:    content,
+			Version: 1,
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the CodeLens call
+
+	lenses, err := srv.CodeLens(ctx, &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI(uri)},
+	})
+	if err == nil {
+		t.Fatalf("expected non-nil error for cancelled context, got nil (lenses: %#v)", lenses)
+	}
+	if lenses != nil {
+		t.Fatalf("expected nil lenses for cancelled context, got %#v", lenses)
+	}
+}
+
 func findCodeLensAtPosition(lenses []protocol.CodeLens, pos protocol.Position) *protocol.CodeLens {
 	for i := range lenses {
 		lens := &lenses[i]

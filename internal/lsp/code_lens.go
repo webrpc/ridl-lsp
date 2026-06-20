@@ -23,9 +23,17 @@ func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) 
 	if !ok {
 		return []protocol.CodeLens{}, nil
 	}
-
+	// Check cancellation before the (potentially expensive) initial parse so a
+	// cancelled request never surfaces as a misleading empty success.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	parse := s.newRequestParse(ctx)
-	semanticDoc := newSemanticDocument(doc.Path, doc.Content, parse(doc.Path))
+	rootResult := parse(doc.Path)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	semanticDoc := newSemanticDocument(doc.Path, doc.Content, rootResult)
 	if !semanticDoc.valid() {
 		return []protocol.CodeLens{}, nil
 	}
@@ -44,11 +52,6 @@ func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) 
 	base := semanticDoc.codeLenses()
 	lenses := make([]protocol.CodeLens, 0, len(base))
 	for i := range base {
-		// Stop between symbols so a cancelled request never returns a partial
-		// under-counted result to the client.
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		data, ok := decodeCodeLensData(base[i].Data)
 		if !ok {
 			continue
@@ -61,6 +64,12 @@ func (s *Server) CodeLens(ctx context.Context, params *protocol.CodeLensParams) 
 			continue
 		}
 		locations := collectReferenceLocationsWith(parse, candidatePaths, s.contentForPath, target, false, resolveType, resolveError)
+		// Check after the (potentially expensive) cross-file collection so a
+		// cancelled request — including on the last/only symbol — never returns
+		// a partial under-counted result to the client.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		lens := base[i]
 		lens.Command = &protocol.Command{
 			Title:     referenceCountTitle(len(locations)),
