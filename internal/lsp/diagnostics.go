@@ -185,8 +185,8 @@ func (s *Server) importDiagnostics(ctx context.Context, doc *documents.Document,
 		importPath := importNode.Path().String()
 		resolvedPath := workspace.ResolveImportPath(doc.Path, importPath)
 
-		importResult, err := s.parser.Parse(ctx, s.workspace.Root(), resolvedPath, s.overlayContents())
-		if err != nil || importResult == nil || importResult.Root == nil {
+		importResult := s.parsePath(ctx, resolvedPath)
+		if importResult == nil || importResult.Root == nil {
 			continue
 		}
 

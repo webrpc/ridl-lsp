@@ -38,6 +38,8 @@ type mockClient struct {
 	appliedEdit             *protocol.ApplyWorkspaceEditParams
 	diagnostics             map[string][]protocol.Diagnostic
 	semanticTokensRefreshes int
+	registrations           []protocol.Registration
+	registerErr             error
 }
 
 func newMockClient() *mockClient {
@@ -88,6 +90,21 @@ func (m *mockClient) lastAppliedEdit() *protocol.ApplyWorkspaceEditParams {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.appliedEdit
+}
+
+func (m *mockClient) RegisterCapability(_ context.Context, params *protocol.RegistrationParams) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.registrations = append(m.registrations, params.Registrations...)
+	return m.registerErr
+}
+
+func (m *mockClient) getRegistrations() []protocol.Registration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]protocol.Registration, len(m.registrations))
+	copy(out, m.registrations)
+	return out
 }
 
 func setupServer(t *testing.T) (*Server, *mockClient, string) {
