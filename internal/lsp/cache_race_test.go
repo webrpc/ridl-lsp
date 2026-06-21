@@ -74,6 +74,21 @@ import
 		t.Fatal(err)
 	}
 
+	// Put the cursor on the Point type definition so References runs a real
+	// cross-file search, walking the CLOSED importer files through
+	// parsePathForNavigation -> parsePath -> the session parse cache. A header
+	// position resolves no target and would never reach the cache.
+	pointPos := positionAt(t, baseContent, "Point")
+
+	// Precondition: a closed-file parse must populate the session cache, else the
+	// concurrent loop below would not exercise the cache path it claims to test.
+	if got := srv.parsePath(ctx, imp1Path); got == nil || got.Root == nil {
+		t.Fatal("precondition: closed importer parse must succeed")
+	}
+	if _, ok := srv.parseCache.get(imp1Path, srv.gen.Load()); !ok {
+		t.Fatal("precondition: session parse cache was not populated by a closed-file parse")
+	}
+
 	const (
 		numReaders  = 16
 		numChangers = 2
@@ -88,7 +103,7 @@ import
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < iters; j++ {
-				pos := protocol.Position{Line: 0, Character: 0}
+				pos := pointPos
 				switch id % 4 {
 				case 0:
 					_, _ = srv.References(ctx, &protocol.ReferenceParams{
