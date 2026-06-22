@@ -1,5 +1,7 @@
 # ridl-lsp
 
+[![Release](https://img.shields.io/github/v/release/webrpc/ridl-lsp)](https://github.com/webrpc/ridl-lsp/releases)
+
 A standalone [Language Server](https://microsoft.github.io/language-server-protocol/)
 for [webrpc](https://github.com/webrpc/webrpc) **RIDL** schema files (`.ridl`).
 It gives any LSP-capable editor rich, schema-aware editing for RIDL: navigation,
